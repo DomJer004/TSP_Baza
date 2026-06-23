@@ -1593,7 +1593,8 @@ menu_options = [
     "Centrum Meczowe",
     "🏆 Rekordy & TOP",
     "Trenerzy",
-    ]
+    "🎮 Zgadnij Skład"  # <--- DODAJ TĘ LINIJKĘ
+]
 
 opcja = st.sidebar.radio("Moduł:", menu_options)
 
@@ -3721,3 +3722,443 @@ elif opcja == "Trenerzy":
                         else:
                             st.error("Brak kolumny z datą w mecze.csv")
 
+elif opcja == "🎮 Zgadnij Skład":
+    import unicodedata
+
+
+    def normalize_name(name):
+        if not isinstance(name, str): return ""
+        s = name.lower().strip()
+        s = s.replace('ł', 'l').replace('ø', 'o').replace('đ', 'd').replace('ß', 'ss').replace('æ', 'ae')
+        s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+        return s
+
+
+    st.header("🎮 Strefa Gier TSP")
+
+    tab_mecz, tab_kontra = st.tabs(["🏟️ Meczowa Jedenastka", "🧩 Wyzwanie: Jedenastka Powiązań"])
+
+    df_w = load_details("wystepy.csv")
+    df_p = load_data("pilkarze.csv")
+
+    if df_w is None or df_p is None:
+        st.error("Brak plików wystepy.csv lub pilkarze.csv do uruchomienia gry.")
+    else:
+        all_player_names = sorted(df_p['imię i nazwisko'].dropna().astype(str).unique().tolist())
+
+        # ==========================================
+        # GRA 1: MECZOWA JEDENASTKA
+        # ==========================================
+        with tab_mecz:
+            st.markdown("Wylosuj historyczny mecz i spróbuj odgadnąć wyjściową jedenastkę. Wybieraj nazwiska z listy!")
+
+            if 'quiz_active' not in st.session_state: st.session_state['quiz_active'] = False
+            if 'quiz_guessed' not in st.session_state: st.session_state['quiz_guessed'] = []
+
+            if not st.session_state['quiz_active']:
+                if st.button("🎲 Wylosuj Mecz i Rozpocznij Grę", use_container_width=True, type="primary"):
+                    starters = df_w[
+                        (df_w['Status'].isin(['Cały mecz', 'Zszedł', 'Grał', 'Czerwona kartka', 'Czerwona'])) & (
+                                    df_w['Status'] != 'Wszedł')].copy()
+                    match_counts = starters.groupby('Mecz_Label').size()
+                    valid_matches = match_counts[match_counts == 11].index.tolist()
+
+                    if valid_matches:
+                        chosen_match = random.choice(valid_matches)
+                        st.session_state['quiz_match'] = chosen_match
+
+                        squad = starters[starters['Mecz_Label'] == chosen_match]['Zawodnik_Clean'].tolist()
+                        df_p_c = df_p.copy()
+                        df_p_c['join_key'] = df_p_c['imię i nazwisko'].astype(str).str.lower().str.strip()
+                        df_p_c = prepare_flags(df_p_c)
+
+                        target_players = []
+                        for p in squad:
+                            p_norm = str(p).lower().strip()
+                            p_data = df_p_c[df_p_c['join_key'] == p_norm]
+                            if not p_data.empty:
+                                row = p_data.iloc[0]
+                                pos = str(row.get('pozycja', '-')).capitalize()
+                                flag = row.get('Flaga', None)
+                                exact_name = str(row.get('imię i nazwisko', p))
+                            else:
+                                pos = "Nieznana"
+                                flag = None
+                                exact_name = str(p)
+
+                            p_l = pos.lower()
+                            if 'bram' in p_l or 'gk' in p_l:
+                                sort_pos = 1
+                            elif 'obr' in p_l or 'def' in p_l:
+                                sort_pos = 2
+                            elif 'pom' in p_l or 'mid' in p_l:
+                                sort_pos = 3
+                            elif 'nap' in p_l or 'for' in p_l:
+                                sort_pos = 4
+                            else:
+                                sort_pos = 5
+
+                            target_players.append({
+                                'name': exact_name, 'pos': pos, 'sort_pos': sort_pos, 'flag': flag
+                            })
+
+                        target_players.sort(key=lambda x: x['sort_pos'])
+                        st.session_state['quiz_target'] = target_players
+                        st.session_state['quiz_guessed'] = []
+                        st.session_state['quiz_active'] = True
+                        st.session_state['quiz_give_up'] = False
+                        st.rerun()
+                    else:
+                        st.error("Brak w bazie meczów z kompletną, 11-osobową wyjściową jedenastką.")
+
+            if st.session_state.get('quiz_active'):
+                match_label = st.session_state['quiz_match']
+                target_squad = st.session_state['quiz_target']
+                guessed = st.session_state['quiz_guessed']
+
+                try:
+                    parts = match_label.split('|')
+                    info_s = parts[1].strip() if len(parts) > 1 else match_label
+                    date_s = parts[0].strip()
+                except:
+                    info_s = match_label
+                    date_s = "-"
+
+                st.markdown(f"""
+                <div style="text-align: center; padding: 15px; background-color: rgba(52, 152, 219, 0.15); border: 2px solid #3498db; border-radius: 8px; margin-bottom: 20px;">
+                    <h2 style="margin:0; color: var(--text-color);">{info_s}</h2>
+                    <p style="color: gray; margin: 4px 0 0 0;">📅 {date_s}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                progress = len(guessed) / 11
+                st.progress(progress)
+                st.write(f"**Odgadnięto:** {len(guessed)}/11")
+
+                if not st.session_state.get('quiz_give_up') and len(guessed) < 11:
+                    with st.form(key="quiz_form", clear_on_submit=True):
+                        col_inp, col_btn, col_give = st.columns([3, 1, 1])
+                        with col_inp:
+                            guess_input = st.selectbox("Wybierz gracza", options=[""] + all_player_names,
+                                                       label_visibility="collapsed")
+                        with col_btn:
+                            submit_guess = st.form_submit_button("Sprawdź", use_container_width=True)
+                        with col_give:
+                            give_up = st.form_submit_button("Poddaję się 🏳️", use_container_width=True)
+
+                    if give_up:
+                        st.session_state['quiz_give_up'] = True
+                        st.rerun()
+
+                    if submit_guess and guess_input:
+                        hit = False
+                        for p in target_squad:
+                            if p['name'] not in guessed and guess_input == p['name']:
+                                st.session_state['quiz_guessed'].append(p['name'])
+                                st.success(f"Trafiony: **{p['name']}**!")
+                                hit = True
+                                time.sleep(0.5)
+                                st.rerun()
+                        if not hit:
+                            if guess_input in guessed:
+                                st.warning("Ten zawodnik został już odgadnięty!")
+                            else:
+                                st.error("Pudło! Ten gracz nie zagrał w tym meczu.")
+
+                if len(guessed) == 11:
+                    st.balloons()
+                    st.success("🎉 Niesamowite! Odgadłeś całą jedenastkę!")
+                elif st.session_state.get('quiz_give_up'):
+                    st.error("Gra przerwana. Oto pełny skład:")
+
+                if len(guessed) == 11 or st.session_state.get('quiz_give_up'):
+                    if st.button("🔄 Zagraj jeszcze raz", use_container_width=True):
+                        st.session_state['quiz_active'] = False
+                        st.rerun()
+
+                st.divider()
+
+                for p in target_squad:
+                    is_guessed = p['name'] in guessed
+                    is_revealed = is_guessed or st.session_state.get('quiz_give_up')
+                    flag_html = f'<img src="{p["flag"]}" width="30" style="border-radius: 3px; border: 1px solid #aaa;">' if \
+                    p['flag'] else '🏳️'
+
+                    if is_revealed:
+                        bg_color = "rgba(40, 167, 69, 0.2)" if is_guessed else "rgba(220, 53, 69, 0.2)"
+                        border_color = "#28a745" if is_guessed else "#dc3545"
+                        name_display = p['name']
+                    else:
+                        bg_color = "rgba(255, 255, 255, 0.05)"
+                        border_color = "#666"
+                        name_display = "❓❓❓"
+
+                    st.markdown(f"""
+                    <div style="display: flex; align-items: center; padding: 10px; margin-bottom: 8px; background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 5px;">
+                        <div style="width: 50px; text-align: center; margin-right: 15px;">{flag_html}</div>
+                        <div style="width: 100px; font-weight: bold; color: gray; font-size: 0.9em;">{p['pos']}</div>
+                        <div style="flex-grow: 1; font-size: 1.1em; font-weight: bold; letter-spacing: 1px;">{name_display}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # ==========================================
+        # GRA 2: WYZWANIE: JEDENASTKA POWIĄZAŃ
+        # ==========================================
+        with tab_kontra:
+            st.markdown(
+                "Skompletuj jedenastkę zawodników. Każdy gracz musi pasować do opisu na karcie i **nikt nie może się powtarzać na boisku!**")
+
+            if 'kontra_challenges' not in st.session_state:
+                st.session_state['kontra_challenges'] = []
+            if 'kontra_used_players' not in st.session_state:
+                st.session_state['kontra_used_players'] = []
+
+
+            def generate_kontra_challenges():
+                df_coaches = load_data("trenerzy.csv")
+                coaches_list = []
+                if df_coaches is not None:
+                    for _, c_row in df_coaches.iterrows():
+                        c_name = str(c_row.get('imię i nazwisko', 'Nieznany'))
+                        s_val = str(c_row.get('początek', '')).strip()
+                        e_val = str(c_row.get('koniec', '')).strip()
+                        try:
+                            c_start = pd.to_datetime(s_val, dayfirst=True) if s_val not in ['', '-',
+                                                                                            'nan'] else pd.Timestamp.min
+                        except:
+                            c_start = pd.Timestamp.min
+                        try:
+                            c_end = pd.to_datetime(e_val, dayfirst=True) if e_val not in ['', '-', 'nan',
+                                                                                          'obecnie'] else pd.Timestamp.now() + pd.Timedelta(
+                                days=365)
+                        except:
+                            c_end = pd.Timestamp.now() + pd.Timedelta(days=365)
+                        coaches_list.append((c_name, c_start, c_end))
+
+                df_w_c = df_w.copy()
+                df_w_c['Data_Sort'] = pd.to_datetime(df_w_c['Data_Sort'], errors='coerce')
+                df_w_c['join_key'] = df_w_c['Zawodnik_Clean'].astype(str).str.lower().str.strip()
+                player_dates = df_w_c.groupby('join_key')['Data_Sort'].apply(lambda x: x.dropna().tolist()).to_dict()
+
+                agg = df_w_c.groupby('Zawodnik_Clean').agg(
+                    {'Mecz_Label': 'nunique', 'Gole': 'sum', 'Czerwone': 'sum'}).reset_index()
+                df_p_c = df_p.copy()
+                df_p_c['join_key'] = df_p_c['imię i nazwisko'].astype(str).str.lower().str.strip()
+                agg['join_key'] = agg['Zawodnik_Clean'].astype(str).str.lower().str.strip()
+                merged = pd.merge(agg, df_p_c, on='join_key', how='left')
+
+                catalog = []
+                for _, r in merged.iterrows():
+                    name = str(r.get('imię i nazwisko', r['Zawodnik_Clean']))
+                    j_key = r['join_key']
+                    tags = {'nat': [], 'pos': [], 'stat': [], 'age': [], 'coach': []}
+
+                    nat = str(r.get('Narodowość', '-'))
+                    if nat not in ['-', 'nan', '']:
+                        kraj = nat.split('/')[0].strip()
+                        tags['nat'].append(f"Kraj: {kraj}")
+                        if 'Polska' not in nat: tags['nat'].append("Obcokrajowiec")
+
+                    pos = str(r.get('pozycja', '-')).lower()
+                    if 'bram' in pos or 'gk' in pos: tags['pos'].append("Bramkarz")
+                    if 'obr' in pos or 'def' in pos: tags['pos'].append("Obrońca")
+                    if 'pom' in pos or 'mid' in pos: tags['pos'].append("Pomocnik")
+                    if 'nap' in pos or 'for' in pos: tags['pos'].append("Napastnik")
+
+                    m = r['Mecz_Label']
+                    if m >= 100:
+                        tags['stat'].append("100+ występów")
+                    elif m >= 50:
+                        tags['stat'].append("50+ występów")
+
+                    g = r['Gole']
+                    if g >= 20:
+                        tags['stat'].append("Strzelił 20+ goli")
+                    elif g >= 10:
+                        tags['stat'].append("Strzelił 10+ goli")
+                    elif g >= 5:
+                        tags['stat'].append("Strzelił 5+ goli")
+                    if g == 0 and m >= 20: tags['stat'].append("Brak goli (min. 20 spotkań)")
+                    if r['Czerwone'] >= 1: tags['stat'].append("Obejrzał czerwoną kartkę")
+
+                    birth = r.get('data urodzenia', None)
+                    if pd.notna(birth) and str(birth) not in ['-', 'nan']:
+                        try:
+                            yr = pd.to_datetime(birth).year
+                            if yr <= 1985:
+                                tags['age'].append("Urodzony w ≤ 1985 r.")
+                            elif yr >= 2000:
+                                tags['age'].append("Urodzony po 2000 r.")
+                            elif 1990 <= yr <= 1999:
+                                tags['age'].append("Urodzony w latach 90.")
+                        except:
+                            pass
+
+                    my_dates = player_dates.get(j_key, [])
+                    my_coaches = set()
+                    for d in my_dates:
+                        for c_name, c_start, c_end in coaches_list:
+                            if c_start <= d <= c_end:
+                                my_coaches.add(f"Grał dla: {c_name}")
+                    if my_coaches: tags['coach'].extend(list(my_coaches))
+
+                    catalog.append({
+                        'name': name, 'tags': tags,
+                        'flag': get_flag_url(nat) if 'get_flag_url' in globals() else None
+                    })
+
+                valid_pairs = []
+                formation = ['Bramkarz', 'Obrońca', 'Obrońca', 'Obrońca', 'Obrońca',
+                             'Pomocnik', 'Pomocnik', 'Pomocnik', 'Pomocnik', 'Napastnik', 'Napastnik']
+
+                for target_pos in formation:
+                    sub_catalog = [p for p in catalog if target_pos in p['tags']['pos']]
+                    if not sub_catalog: continue
+
+                    attempts = 0
+                    found = False
+                    while not found and attempts < 1000:
+                        attempts += 1
+                        p = random.choice(sub_catalog)
+                        avail_cats = [c for c in p['tags'].keys() if c != 'pos' and p['tags'][c]]
+                        if not avail_cats: continue
+
+                        num_conds = random.choices([1, 2], weights=[0.3, 0.7])[0]
+                        if num_conds == 1:
+                            c1 = random.choice(avail_cats)
+                            pair = [random.choice(p['tags'][c1])]
+                        else:
+                            if len(avail_cats) >= 2:
+                                c1, c2 = random.sample(avail_cats, 2)
+                                pair = [random.choice(p['tags'][c1]), random.choice(p['tags'][c2])]
+                            else:
+                                c1 = avail_cats[0]
+                                if len(p['tags'][c1]) >= 2:
+                                    pair = random.sample(p['tags'][c1], 2)
+                                else:
+                                    pair = [p['tags'][c1][0]]
+
+                        matching_players = []
+                        for pl in sub_catalog:
+                            pl_all_tags = []
+                            for v in pl['tags'].values(): pl_all_tags.extend(v)
+                            if all(t in pl_all_tags for t in pair):
+                                matching_players.append(pl)
+
+                        count = len(matching_players)
+                        if 0 < count <= 40:
+                            pair_set = set(pair)
+                            if not any(set(x['pair']) == pair_set and x['pos'] == target_pos for x in valid_pairs):
+                                if count == 1:
+                                    rar = "👑 Legendarny"
+                                elif count <= 3:
+                                    rar = "🟣 Epicki"
+                                elif count <= 8:
+                                    rar = "🔵 Rzadki"
+                                else:
+                                    rar = "⚪ Zwykły"
+
+                                # Gwarancja braku duplikatów przy tworzeniu listy podpowiedzi
+                                unique_names = sorted(list(set(x['name'] for x in matching_players)))
+
+                                valid_pairs.append({
+                                    'pos': target_pos,
+                                    'pair': pair,
+                                    'valid_names': unique_names,
+                                    'valid_full_data': matching_players,
+                                    'rarity': rar,
+                                    'count': count,
+                                    'solved': False,
+                                    'guessed_name': None,
+                                    'guessed_flag': None
+                                })
+                                found = True
+                return valid_pairs
+
+
+            if not st.session_state['kontra_challenges']:
+                st.session_state['kontra_challenges'] = generate_kontra_challenges()
+
+            col_btn1, col_btn2 = st.columns([1, 4])
+            with col_btn1:
+                if st.button("🔄 Wylosuj Nową Jedenastkę", type="primary"):
+                    st.session_state['kontra_challenges'] = generate_kontra_challenges()
+                    st.session_state['kontra_used_players'] = []
+                    st.rerun()
+
+            st.divider()
+
+
+            # Funkcja renderująca pojedynczą kartę na boisku
+            def render_kontra_card(idx, chal):
+                cond_text = " + ".join(chal['pair'])
+                st.markdown(f"""
+                <div style='text-align:center; background-color: var(--secondary-background-color); padding:10px; border-radius:8px; border:1px solid #444; margin-bottom:10px; min-height: 90px; display:flex; flex-direction:column; justify-content:center;'>
+                    <span style='font-size:0.9em; font-weight:bold; color:#d4af37;'>{cond_text}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if chal['solved']:
+                    flag_html = f'<img src="{chal["guessed_flag"]}" style="width:20px; border-radius:2px; margin-right:5px;">' if \
+                    chal['guessed_flag'] else '🏁'
+                    st.markdown(f"""
+                    <div style='text-align:center; background:#28a74530; border:1px solid #28a745; padding:8px; border-radius:5px;'>
+                        {flag_html} <b>{chal['guessed_name']}</b><br>
+                        <small style="color:gray;">{chal['rarity']}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    guess_k = st.selectbox("Wybierz gracza", options=[""] + all_player_names, key=f"k_sel_{idx}",
+                                           label_visibility="collapsed")
+                    if st.button("Sprawdź", key=f"k_btn_{idx}", use_container_width=True):
+                        if guess_k:
+                            if guess_k in st.session_state['kontra_used_players']:
+                                st.toast(f"❌ {guess_k} znajduje się już w Twojej jedenastce!", icon="❌")
+                            else:
+                                hit_player = next((p for p in chal['valid_full_data'] if guess_k == p['name']), None)
+                                if hit_player:
+                                    chal['solved'] = True
+                                    chal['guessed_name'] = hit_player['name']
+                                    chal['guessed_flag'] = hit_player['flag']
+                                    st.session_state['kontra_used_players'].append(hit_player['name'])
+                                    st.rerun()
+                                else:
+                                    st.toast("❌ Pudło! Ten gracz nie pasuje do opisu.", icon="❌")
+                        else:
+                            st.toast("⚠️ Najpierw wybierz gracza z listy.", icon="⚠️")
+
+                    with st.expander("❓ Odpowiedzi"):
+                        for n in chal['valid_names']:
+                            st.caption(f"- {n}")
+
+
+            # RYSOWANIE WIZUALNEJ JEDENASTKI (FORMACJA 1-4-4-2)
+            challenges = st.session_state['kontra_challenges']
+            if len(challenges) == 11:
+                # BRAMKARZ
+                st.markdown("<h4 style='text-align:center; margin-top:20px;'>🧤 Bramkarz</h4>", unsafe_allow_html=True)
+                c_gk1, c_gk2, c_gk3 = st.columns([1, 2, 1])
+                with c_gk2:
+                    render_kontra_card(0, challenges[0])
+
+                # OBROŃCY
+                st.markdown("<h4 style='text-align:center; margin-top:20px;'>🛡️ Obrońcy</h4>", unsafe_allow_html=True)
+                cols_def = st.columns(4)
+                for i in range(4):
+                    with cols_def[i]: render_kontra_card(i + 1, challenges[i + 1])
+
+                # POMOCNICY
+                st.markdown("<h4 style='text-align:center; margin-top:20px;'>🎯 Pomocnicy</h4>", unsafe_allow_html=True)
+                cols_mid = st.columns(4)
+                for i in range(4):
+                    with cols_mid[i]: render_kontra_card(i + 5, challenges[i + 5])
+
+                # NAPASTNICY
+                st.markdown("<h4 style='text-align:center; margin-top:20px;'>⚽ Napastnicy</h4>", unsafe_allow_html=True)
+                c_att1, c_att2, c_att3, c_att4 = st.columns([1, 2, 2, 1])
+                with c_att2:
+                    render_kontra_card(9, challenges[9])
+                with c_att3:
+                    render_kontra_card(10, challenges[10])
+            else:
+                st.error("Błąd generowania jedenastki. Wciśnij 'Wylosuj Nową Jedenastkę'.")
