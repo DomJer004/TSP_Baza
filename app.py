@@ -2299,20 +2299,20 @@ elif opcja == "Aktualny Sezon (25/26)":
 
 elif opcja == "Składy Historyczne":
     st.header("🗂️ Składy Historyczne")
-
+    
     # ROUTER PROFILU ZAWODNIKA
     if st.session_state.get('cm_selected_player'):
-        if st.button("⬅️ Wróć do składu"):
+        if st.button("⬅️ Wróć do składu"): 
             st.session_state['cm_selected_player'] = None
             st.rerun()
         st.divider()
         render_player_profile(st.session_state['cm_selected_player'])
-
+        
     # GŁÓWNY WIDOK
     else:
         df_det = load_details("wystepy.csv")
         df_bio = load_data("pilkarze.csv")
-        if 'filter_seasons' in globals():
+        if 'filter_seasons' in globals(): 
             df_det = filter_seasons(df_det, 'Sezon')
 
         if df_det is None or df_bio is None:
@@ -2332,10 +2332,10 @@ elif opcja == "Składy Historyczne":
             if prev_season:
                 prev_data = df_det[df_det['Sezon'] == prev_season]
                 prev_players = set(prev_data['Zawodnik_Clean'].unique())
-
+                
                 przyszli = curr_players - prev_players
                 odeszli = prev_players - curr_players
-
+                
                 st.markdown(f"### 🔄 Zmiany w kadrze (względem sezonu {prev_season})")
                 c_in, c_out = st.columns(2)
                 with c_in:
@@ -2358,20 +2358,57 @@ elif opcja == "Składy Historyczne":
 
             merged = pd.merge(agg, df_bio_unique, left_on='Zawodnik_Clean', right_on='join_key', how='left')
             merged['Zawodnik_Display'] = merged['Zawodnik_Clean']
+            
+            # --- LOGIKA MŁODZIEŻOWCA ---
+            def get_youth_threshold(season_str):
+                try:
+                    # Wyciąganie roku startowego, np. 2024 z "2024/2025" lub "2024/25"
+                    s_year = int(str(season_str).split('/')[0].strip()[-4:])
+                    if s_year >= 2024:
+                        return s_year - 20  # 2025->2005, 2024->2004
+                    else:
+                        return s_year - 19  # 2023->2004, 2022->2003, 2021->2002 itd.
+                except:
+                    return 2000
+
+            youth_year = get_youth_threshold(sel_season)
+            
+            col_b = next((c for c in merged.columns if c in ['data urodzenia', 'urodzony', 'data_ur']), None)
+            if col_b:
+                def check_youth(date_val):
+                    if pd.isna(date_val) or str(date_val).strip() in ['-', '', 'nan']: return False
+                    try:
+                        dt = pd.to_datetime(date_val, dayfirst=True)
+                        return dt.year >= youth_year
+                    except:
+                        return False
+                
+                merged['is_youth'] = merged[col_b].apply(check_youth)
+                # Dopisanie "Ⓜ️ " do wyświetlanego nazwiska
+                merged.loc[merged['is_youth'], 'Zawodnik_Display'] = "Ⓜ️ " + merged.loc[merged['is_youth'], 'Zawodnik_Clean']
+            else:
+                merged['is_youth'] = False
+
+            # Filtr jeśli zaznaczono checkbox
+            if show_only_youth:
+                merged = merged[merged['is_youth']]
+                if merged.empty:
+                    st.warning(f"Brak młodzieżowców (rocznik {youth_year} i młodsi) w danych dla sezonu {sel_season}.")
 
             # Sortowanie i dodanie kolumny Lp.
-            merged = merged.sort_values(by=['Mecze', 'Minuty'], ascending=[False, False])
+            merged = merged.sort_values(by=['Mecze', 'Minuty'], ascending=[False, False]).reset_index(drop=True)
             merged.insert(0, 'Lp.', range(1, len(merged) + 1))
 
             st.markdown(f"### 👥 Występy w sezonie {sel_season}")
-            st.caption("ℹ️ Kliknij w zawodnika, aby otworzyć jego pełny profil.")
-
+            if not show_only_youth:
+                st.caption(f"ℹ️ Kliknij w zawodnika, aby otworzyć jego pełny profil. Znak Ⓜ️ oznacza status młodzieżowca w tym sezonie (ur. w {youth_year} r. i młodsi).")
+            
             # Interaktywna tabela z flagami
             event_hist = st.dataframe(
-                merged[['Lp.', 'Flaga', 'Zawodnik_Display', 'pozycja', 'Mecze', 'Minuty', 'Gole', 'Żółte', 'Czerwone']],
-                use_container_width=True,
+                merged[['Lp.', 'Flaga', 'Zawodnik_Display', 'pozycja', 'Mecze', 'Minuty', 'Gole', 'Żółte', 'Czerwone']], 
+                use_container_width=True, 
                 hide_index=True,
-                on_select="rerun",
+                on_select="rerun", 
                 selection_mode="single-row",
                 key=f"hist_squad_{sel_season}",
                 column_config={
@@ -2379,15 +2416,14 @@ elif opcja == "Składy Historyczne":
                     "Flaga": st.column_config.ImageColumn("Kraj", width="small"),
                     "Zawodnik_Display": st.column_config.TextColumn("Imię i nazwisko"),
                     "pozycja": st.column_config.TextColumn("Pozycja"),
-                    "Mecze": st.column_config.ProgressColumn("Mecze", format="%d", min_value=0,
-                                                             max_value=int(merged['Mecze'].max() or 1)),
+                    "Mecze": st.column_config.ProgressColumn("Mecze", format="%d", min_value=0, max_value=int(merged['Mecze'].max() or 1)),
                     "Minuty": st.column_config.NumberColumn("Minuty", format="%d'"),
                     "Gole": st.column_config.NumberColumn("Gole", format="%d ⚽"),
                     "Żółte": st.column_config.NumberColumn("Żółte", format="%d 🟨"),
                     "Czerwone": st.column_config.NumberColumn("Czerwone", format="%d 🟥")
                 }
             )
-
+            
             # Obsługa kliknięcia (router)
             if event_hist.selection.rows:
                 st.session_state['cm_selected_player'] = merged.iloc[event_hist.selection.rows[0]]['Zawodnik_Clean']
