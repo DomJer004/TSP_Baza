@@ -2320,7 +2320,7 @@ elif opcja == "Składy Historyczne":
         else:
             seasons = sorted(df_det['Sezon'].dropna().unique(), reverse=True)
             sel_season = st.selectbox("Wybierz Sezon:", seasons)
-            show_only_youth = st.checkbox("Tylko Młodzieżowcy (Ⓜ️)")
+            show_only_youth = st.checkbox("Tylko Młodzieżowcy (rocznikowo)")
 
             # --- LOGIKA TRANSFERÓW (RÓŻNICA WZGLĘDEM POPRZEDNIEGO SEZONU) ---
             idx = seasons.index(sel_season)
@@ -2359,10 +2359,9 @@ elif opcja == "Składy Historyczne":
             merged = pd.merge(agg, df_bio_unique, left_on='Zawodnik_Clean', right_on='join_key', how='left')
             merged['Zawodnik_Display'] = merged['Zawodnik_Clean']
             
-            # --- LOGIKA MŁODZIEŻOWCA ---
+            # --- LOGIKA MŁODZIEŻOWCA (Wiek + Narodowość) ---
             def get_youth_threshold(season_str):
                 try:
-                    # Wyciąganie roku startowego, np. 2024 z "2024/2025" lub "2024/25"
                     s_year = int(str(season_str).split('/')[0].strip()[-4:])
                     if s_year >= 2024:
                         return s_year - 20  # 2025->2005, 2024->2004
@@ -2375,7 +2374,7 @@ elif opcja == "Składy Historyczne":
             
             col_b = next((c for c in merged.columns if c in ['data urodzenia', 'urodzony', 'data_ur']), None)
             if col_b:
-                def check_youth(date_val):
+                def check_youth_age(date_val):
                     if pd.isna(date_val) or str(date_val).strip() in ['-', '', 'nan']: return False
                     try:
                         dt = pd.to_datetime(date_val, dayfirst=True)
@@ -2383,9 +2382,20 @@ elif opcja == "Składy Historyczne":
                     except:
                         return False
                 
-                merged['is_youth'] = merged[col_b].apply(check_youth)
-                # Dopisanie "Ⓜ️ " do wyświetlanego nazwiska
-                merged.loc[merged['is_youth'], 'Zawodnik_Display'] = "Ⓜ️ " + merged.loc[merged['is_youth'], 'Zawodnik_Clean']
+                merged['is_youth_age'] = merged[col_b].apply(check_youth_age)
+                
+                def apply_youth_icon(row):
+                    if not row['is_youth_age']:
+                        return row['Zawodnik_Clean']
+                    
+                    nat = str(row.get('Narodowość', '')).lower()
+                    if 'polska' in nat or 'pol' in nat:
+                        return "Ⓜ️ " + row['Zawodnik_Clean']
+                    else:
+                        return "🌍Ⓜ️ " + row['Zawodnik_Clean']
+                        
+                merged['Zawodnik_Display'] = merged.apply(apply_youth_icon, axis=1)
+                merged['is_youth'] = merged['is_youth_age'] # Używane do checkboxa (pokazuje obie grupy)
             else:
                 merged['is_youth'] = False
 
@@ -2401,7 +2411,7 @@ elif opcja == "Składy Historyczne":
 
             st.markdown(f"### 👥 Występy w sezonie {sel_season}")
             if not show_only_youth:
-                st.caption(f"ℹ️ Kliknij w zawodnika, aby otworzyć jego pełny profil. Znak Ⓜ️ oznacza status młodzieżowca w tym sezonie (ur. w {youth_year} r. i młodsi).")
+                st.caption(f"ℹ️ Znak Ⓜ️ oznacza polskiego młodzieżowca (ur. w {youth_year} r. i młodsi), a 🌍Ⓜ️ zagranicznego gracza w tym samym wieku.")
             
             # Interaktywna tabela z flagami
             event_hist = st.dataframe(
