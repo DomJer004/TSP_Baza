@@ -3782,30 +3782,63 @@ elif opcja == "🎮 Zgadnij Skład":
 
     st.header("🎮 Strefa Gier TSP")
 
-    tab_mecz, tab_kontra = st.tabs(["🏟️ Meczowa Jedenastka", "🧩 Wyzwanie: Jedenastka Powiązań"])
+    tab_mecz, tab_kontra, tab_kolo = st.tabs(["🏟️ Meczowa Jedenastka", "🧩 Jedenastka Powiązań", "🎡 Koło Fortuny"])
 
     df_w = load_details("wystepy.csv")
     df_p = load_data("pilkarze.csv")
+    df_m = load_data("mecze.csv")
 
     if df_w is None or df_p is None:
         st.error("Brak plików wystepy.csv lub pilkarze.csv do uruchomienia gry.")
     else:
-        all_player_names = sorted(df_p['imię i nazwisko'].dropna().astype(str).unique().tolist())
+        # --- PRZYGOTOWANIE ZNORMALIZOWANEJ LISTY WYSZUKIWANIA ---
+        all_player_names_raw = sorted(df_p['imię i nazwisko'].dropna().astype(str).unique().tolist())
+        all_player_names = []
+        for name in all_player_names_raw:
+            norm = normalize_name(name)
+            if name.lower() != norm.lower():
+                all_player_names.append(f"{name} [{norm}]")
+            else:
+                all_player_names.append(name)
+
+        era_options = {
+            "Wszystkie": (1900, 2100),
+            "Przed awansem (do 2011)": (1900, 2010),
+            "I Ekstraklasa (11/12 - 15/16)": (2011, 2015),
+            "Odbudowa (16/17 - 19/20)": (2016, 2019),
+            "Obecna (od 20/21)": (2020, 2100)
+        }
+
+
+        def get_season_year(sezon_str):
+            try:
+                return int(str(sezon_str).split('/')[0].strip()[-4:])
+            except:
+                return 2000
+
 
         # ==========================================
         # GRA 1: MECZOWA JEDENASTKA
         # ==========================================
         with tab_mecz:
-            st.markdown("Wylosuj historyczny mecz i spróbuj odgadnąć wyjściową jedenastkę. Wybieraj nazwiska z listy!")
+            st.markdown("Wylosuj historyczny mecz z wybranej ery i odgadnij wyjściową jedenastkę!")
 
             if 'quiz_active' not in st.session_state: st.session_state['quiz_active'] = False
             if 'quiz_guessed' not in st.session_state: st.session_state['quiz_guessed'] = []
 
             if not st.session_state['quiz_active']:
+                sel_era_mecz = st.selectbox("Wybierz Erę:", list(era_options.keys()), key="era_mecz")
+                min_yr, max_yr = era_options[sel_era_mecz]
+
                 if st.button("🎲 Wylosuj Mecz i Rozpocznij Grę", use_container_width=True, type="primary"):
                     starters = df_w[
                         (df_w['Status'].isin(['Cały mecz', 'Zszedł', 'Grał', 'Czerwona kartka', 'Czerwona'])) & (
                                     df_w['Status'] != 'Wszedł')].copy()
+
+                    # Filtrowanie po erze
+                    starters['S_Year'] = starters['Sezon'].apply(get_season_year)
+                    starters = starters[(starters['S_Year'] >= min_yr) & (starters['S_Year'] <= max_yr)]
+
                     match_counts = starters.groupby('Mecz_Label').size()
                     valid_matches = match_counts[match_counts == 11].index.tolist()
 
@@ -3855,7 +3888,7 @@ elif opcja == "🎮 Zgadnij Skład":
                         st.session_state['quiz_give_up'] = False
                         st.rerun()
                     else:
-                        st.error("Brak w bazie meczów z kompletną, 11-osobową wyjściową jedenastką.")
+                        st.error("Brak w bazie meczów z kompletną wyjściową jedenastką dla wybranej ery.")
 
             if st.session_state.get('quiz_active'):
                 match_label = st.session_state['quiz_match']
@@ -3867,7 +3900,7 @@ elif opcja == "🎮 Zgadnij Skład":
                     info_s = parts[1].strip() if len(parts) > 1 else match_label
                     date_s = parts[0].strip()
                 except:
-                    info_s = match_label
+                    info_s = match_label;
                     date_s = "-"
 
                 st.markdown(f"""
@@ -3897,16 +3930,17 @@ elif opcja == "🎮 Zgadnij Skład":
                         st.rerun()
 
                     if submit_guess and guess_input:
+                        guess_clean = guess_input.split(' [')[0].strip()
                         hit = False
                         for p in target_squad:
-                            if p['name'] not in guessed and guess_input == p['name']:
+                            if p['name'] not in guessed and guess_clean == p['name']:
                                 st.session_state['quiz_guessed'].append(p['name'])
                                 st.success(f"Trafiony: **{p['name']}**!")
                                 hit = True
                                 time.sleep(0.5)
                                 st.rerun()
                         if not hit:
-                            if guess_input in guessed:
+                            if guess_clean in guessed:
                                 st.warning("Ten zawodnik został już odgadnięty!")
                             else:
                                 st.error("Pudło! Ten gracz nie zagrał w tym meczu.")
@@ -3952,15 +3986,19 @@ elif opcja == "🎮 Zgadnij Skład":
         # ==========================================
         with tab_kontra:
             st.markdown(
-                "Skompletuj jedenastkę zawodników. Każdy gracz musi pasować do opisu na karcie i **nikt nie może się powtarzać na boisku!**")
+                "Skompletuj jedenastkę zawodników. Każdy gracz musi pasować do opisu na karcie i **nikt nie może się powtarzać na boisku!** Masz ograniczoną liczbę błędów!")
 
-            if 'kontra_challenges' not in st.session_state:
-                st.session_state['kontra_challenges'] = []
-            if 'kontra_used_players' not in st.session_state:
-                st.session_state['kontra_used_players'] = []
+            sel_era_kontra = st.selectbox("Ogranicz bazę do Ery:", list(era_options.keys()), key="era_kontra")
+
+            if 'kontra_challenges' not in st.session_state: st.session_state['kontra_challenges'] = []
+            if 'kontra_used_players' not in st.session_state: st.session_state['kontra_used_players'] = []
+            if 'kontra_mistakes' not in st.session_state: st.session_state['kontra_mistakes'] = 0
+            if 'kontra_game_over' not in st.session_state: st.session_state['kontra_game_over'] = False
 
 
-            def generate_kontra_challenges():
+            def generate_kontra_challenges(era_key):
+                min_yr, max_yr = era_options[era_key]
+
                 df_coaches = load_data("trenerzy.csv")
                 coaches_list = []
                 if df_coaches is not None:
@@ -3982,9 +4020,15 @@ elif opcja == "🎮 Zgadnij Skład":
                         coaches_list.append((c_name, c_start, c_end))
 
                 df_w_c = df_w.copy()
+                df_w_c['S_Year'] = df_w_c['Sezon'].apply(get_season_year)
+                # Filtrowanie bazy występów po Erze
+                df_w_c = df_w_c[(df_w_c['S_Year'] >= min_yr) & (df_w_c['S_Year'] <= max_yr)]
+
                 df_w_c['Data_Sort'] = pd.to_datetime(df_w_c['Data_Sort'], errors='coerce')
                 df_w_c['join_key'] = df_w_c['Zawodnik_Clean'].astype(str).str.lower().str.strip()
+
                 player_dates = df_w_c.groupby('join_key')['Data_Sort'].apply(lambda x: x.dropna().tolist()).to_dict()
+                player_seasons = df_w_c.groupby('join_key')['Sezon'].apply(lambda x: set(x.dropna())).to_dict()
 
                 agg = df_w_c.groupby('Zawodnik_Clean').agg(
                     {'Mecz_Label': 'nunique', 'Gole': 'sum', 'Czerwone': 'sum'}).reset_index()
@@ -3997,7 +4041,7 @@ elif opcja == "🎮 Zgadnij Skład":
                 for _, r in merged.iterrows():
                     name = str(r.get('imię i nazwisko', r['Zawodnik_Clean']))
                     j_key = r['join_key']
-                    tags = {'nat': [], 'pos': [], 'stat': [], 'age': [], 'coach': []}
+                    tags = {'nat': [], 'pos': [], 'stat': [], 'age': [], 'coach': [], 'season': []}
 
                     nat = str(r.get('Narodowość', '-'))
                     if nat not in ['-', 'nan', '']:
@@ -4031,12 +4075,18 @@ elif opcja == "🎮 Zgadnij Skład":
                     if pd.notna(birth) and str(birth) not in ['-', 'nan']:
                         try:
                             yr = pd.to_datetime(birth).year
-                            if yr <= 1985:
-                                tags['age'].append("Urodzony w ≤ 1985 r.")
+                            if yr < 1980:
+                                tags['age'].append("Urodzony przed 1980 r.")
+                            elif 1980 <= yr <= 1984:
+                                tags['age'].append("Rocznik 1980-1984")
+                            elif 1985 <= yr <= 1989:
+                                tags['age'].append("Rocznik 1985-1989")
+                            elif 1990 <= yr <= 1994:
+                                tags['age'].append("Rocznik 1990-1994")
+                            elif 1995 <= yr <= 1999:
+                                tags['age'].append("Rocznik 1995-1999")
                             elif yr >= 2000:
                                 tags['age'].append("Urodzony po 2000 r.")
-                            elif 1990 <= yr <= 1999:
-                                tags['age'].append("Urodzony w latach 90.")
                         except:
                             pass
 
@@ -4045,8 +4095,14 @@ elif opcja == "🎮 Zgadnij Skład":
                     for d in my_dates:
                         for c_name, c_start, c_end in coaches_list:
                             if c_start <= d <= c_end:
-                                my_coaches.add(f"Grał dla: {c_name}")
-                    if my_coaches: tags['coach'].extend(list(my_coaches))
+                                my_coaches.add(f"Grał u: {c_name.split()[-1]}")
+                    if my_coaches:
+                        tags['coach'].append(random.choice(list(my_coaches)))
+
+                    my_seasons = player_seasons.get(j_key, set())
+                    if my_seasons:
+                        for s in random.sample(list(my_seasons), min(2, len(my_seasons))):
+                            tags['season'].append(f"Sezon: {s}")
 
                     catalog.append({
                         'name': name, 'tags': tags,
@@ -4063,13 +4119,13 @@ elif opcja == "🎮 Zgadnij Skład":
 
                     attempts = 0
                     found = False
-                    while not found and attempts < 1000:
+                    while not found and attempts < 1500:
                         attempts += 1
                         p = random.choice(sub_catalog)
                         avail_cats = [c for c in p['tags'].keys() if c != 'pos' and p['tags'][c]]
                         if not avail_cats: continue
 
-                        num_conds = random.choices([1, 2], weights=[0.3, 0.7])[0]
+                        num_conds = random.choices([1, 2], weights=[0.25, 0.75])[0]
                         if num_conds == 1:
                             c1 = random.choice(avail_cats)
                             pair = [random.choice(p['tags'][c1])]
@@ -4092,19 +4148,21 @@ elif opcja == "🎮 Zgadnij Skład":
                                 matching_players.append(pl)
 
                         count = len(matching_players)
-                        if 0 < count <= 40:
+
+                        min_req = 4 if attempts < 1000 else 1
+
+                        if count >= min_req and count <= 40:
                             pair_set = set(pair)
                             if not any(set(x['pair']) == pair_set and x['pos'] == target_pos for x in valid_pairs):
-                                if count == 1:
+                                if count <= 4:
                                     rar = "👑 Legendarny"
-                                elif count <= 3:
-                                    rar = "🟣 Epicki"
                                 elif count <= 8:
+                                    rar = "🟣 Epicki"
+                                elif count <= 15:
                                     rar = "🔵 Rzadki"
                                 else:
                                     rar = "⚪ Zwykły"
 
-                                # Gwarancja braku duplikatów przy tworzeniu listy podpowiedzi
                                 unique_names = sorted(list(set(x['name'] for x in matching_players)))
 
                                 valid_pairs.append({
@@ -4122,25 +4180,46 @@ elif opcja == "🎮 Zgadnij Skład":
                 return valid_pairs
 
 
-            if not st.session_state['kontra_challenges']:
-                st.session_state['kontra_challenges'] = generate_kontra_challenges()
-
-            col_btn1, col_btn2 = st.columns([1, 4])
+            col_btn1, col_btn2 = st.columns([1, 2])
             with col_btn1:
                 if st.button("🔄 Wylosuj Nową Jedenastkę", type="primary"):
-                    st.session_state['kontra_challenges'] = generate_kontra_challenges()
-                    st.session_state['kontra_used_players'] = []
+                    with st.spinner("Tasowanie kart..."):
+                        st.session_state['kontra_challenges'] = generate_kontra_challenges(sel_era_kontra)
+                        st.session_state['kontra_used_players'] = []
+                        st.session_state['kontra_mistakes'] = 0
+                        st.session_state['kontra_game_over'] = False
+                        st.rerun()
+            with col_btn2:
+                if st.button("🏳️ Poddaję się", type="secondary"):
+                    st.session_state['kontra_game_over'] = True
                     st.rerun()
+
+            if not st.session_state['kontra_challenges']:
+                st.session_state['kontra_challenges'] = generate_kontra_challenges(sel_era_kontra)
+
+            # --- PANEL ŻYĆ / BŁĘDÓW ---
+            max_mistakes = 15
+            current_mistakes = st.session_state.get('kontra_mistakes', 0)
+            lives_left = max_mistakes - current_mistakes
+
+            if lives_left <= 0:
+                st.session_state['kontra_game_over'] = True
+
+            game_over = st.session_state.get('kontra_game_over', False)
+
+            if game_over:
+                st.error("💀 Koniec Gry! Zobacz odpowiedzi do nieodgadniętych kart.")
+            else:
+                st.info(f"❤️ Pozostało szans: **{lives_left}** / {max_mistakes}")
 
             st.divider()
 
 
-            # Funkcja renderująca pojedynczą kartę na boisku
             def render_kontra_card(idx, chal):
                 cond_text = " + ".join(chal['pair'])
                 st.markdown(f"""
-                <div style='text-align:center; background-color: var(--secondary-background-color); padding:10px; border-radius:8px; border:1px solid #444; margin-bottom:10px; min-height: 90px; display:flex; flex-direction:column; justify-content:center;'>
-                    <span style='font-size:0.9em; font-weight:bold; color:#d4af37;'>{cond_text}</span>
+                <div style='text-align:center; background-color: var(--secondary-background-color); padding:10px; border-radius:8px; border:1px solid var(--text-color); margin-bottom:10px; min-height: 90px; display:flex; flex-direction:column; justify-content:center;'>
+                    <span style='font-size:0.85em; font-weight:bold; color:#d4af37;'>{cond_text}</span>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -4153,53 +4232,60 @@ elif opcja == "🎮 Zgadnij Skład":
                         <small style="color:gray;">{chal['rarity']}</small>
                     </div>
                     """, unsafe_allow_html=True)
+                elif game_over:
+                    st.markdown(f"""
+                    <div style='text-align:center; background:#dc354530; border:1px solid #dc3545; padding:8px; border-radius:5px;'>
+                        <small style="color:#ffcccc; font-weight:bold;">Pasujący m.in.:</small><br>
+                        <span style="font-size: 0.8em;">{', '.join(chal['valid_names'][:3])}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
                 else:
                     guess_k = st.selectbox("Wybierz gracza", options=[""] + all_player_names, key=f"k_sel_{idx}",
                                            label_visibility="collapsed")
                     if st.button("Sprawdź", key=f"k_btn_{idx}", use_container_width=True):
                         if guess_k:
-                            if guess_k in st.session_state['kontra_used_players']:
-                                st.toast(f"❌ {guess_k} znajduje się już w Twojej jedenastce!", icon="❌")
+                            guess_clean = guess_k.split(' [')[0].strip()
+                            if guess_clean in st.session_state['kontra_used_players']:
+                                st.session_state['kontra_mistakes'] += 1
+                                st.toast(f"❌ Błąd! {guess_clean} jest już w jedenastce.", icon="❌")
+                                st.rerun()
                             else:
-                                hit_player = next((p for p in chal['valid_full_data'] if guess_k == p['name']), None)
+                                hit_player = next((p for p in chal['valid_full_data'] if guess_clean == p['name']),
+                                                  None)
                                 if hit_player:
                                     chal['solved'] = True
                                     chal['guessed_name'] = hit_player['name']
                                     chal['guessed_flag'] = hit_player['flag']
                                     st.session_state['kontra_used_players'].append(hit_player['name'])
+
+                                    if all(c['solved'] for c in st.session_state['kontra_challenges']):
+                                        st.balloons()
                                     st.rerun()
                                 else:
-                                    st.toast("❌ Pudło! Ten gracz nie pasuje do opisu.", icon="❌")
+                                    st.session_state['kontra_mistakes'] += 1
+                                    st.toast("❌ Pudło! Gracz nie pasuje do opisu.", icon="❌")
+                                    st.rerun()
                         else:
                             st.toast("⚠️ Najpierw wybierz gracza z listy.", icon="⚠️")
 
-                    with st.expander("❓ Odpowiedzi"):
-                        for n in chal['valid_names']:
-                            st.caption(f"- {n}")
 
-
-            # RYSOWANIE WIZUALNEJ JEDENASTKI (FORMACJA 1-4-4-2)
             challenges = st.session_state['kontra_challenges']
             if len(challenges) == 11:
-                # BRAMKARZ
                 st.markdown("<h4 style='text-align:center; margin-top:20px;'>🧤 Bramkarz</h4>", unsafe_allow_html=True)
                 c_gk1, c_gk2, c_gk3 = st.columns([1, 2, 1])
                 with c_gk2:
                     render_kontra_card(0, challenges[0])
 
-                # OBROŃCY
                 st.markdown("<h4 style='text-align:center; margin-top:20px;'>🛡️ Obrońcy</h4>", unsafe_allow_html=True)
                 cols_def = st.columns(4)
                 for i in range(4):
                     with cols_def[i]: render_kontra_card(i + 1, challenges[i + 1])
 
-                # POMOCNICY
                 st.markdown("<h4 style='text-align:center; margin-top:20px;'>🎯 Pomocnicy</h4>", unsafe_allow_html=True)
                 cols_mid = st.columns(4)
                 for i in range(4):
                     with cols_mid[i]: render_kontra_card(i + 5, challenges[i + 5])
 
-                # NAPASTNICY
                 st.markdown("<h4 style='text-align:center; margin-top:20px;'>⚽ Napastnicy</h4>", unsafe_allow_html=True)
                 c_att1, c_att2, c_att3, c_att4 = st.columns([1, 2, 2, 1])
                 with c_att2:
@@ -4207,4 +4293,110 @@ elif opcja == "🎮 Zgadnij Skład":
                 with c_att3:
                     render_kontra_card(10, challenges[10])
             else:
-                st.error("Błąd generowania jedenastki. Wciśnij 'Wylosuj Nową Jedenastkę'.")
+                st.error("Błąd generowania jedenastki.")
+
+        # ==========================================
+        # GRA 3: KOŁO FORTUNY (Zgadnij Zawodnika)
+        # ==========================================
+        with tab_kolo:
+            st.markdown(
+                "Odgadnij nazwisko ukrytego zawodnika, podając po jednej literze. Możesz zaryzykować i wpisać całe hasło!")
+
+            if 'kf_active' not in st.session_state: st.session_state['kf_active'] = False
+            if 'kf_target_name' not in st.session_state: st.session_state['kf_target_name'] = ""
+            if 'kf_target_norm' not in st.session_state: st.session_state['kf_target_norm'] = ""
+            if 'kf_guessed_letters' not in st.session_state: st.session_state['kf_guessed_letters'] = set()
+            if 'kf_mistakes' not in st.session_state: st.session_state['kf_mistakes'] = 0
+
+            if not st.session_state['kf_active']:
+                if st.button("🎲 Wylosuj Gracza i Graj", use_container_width=True, type="primary"):
+                    # Losujemy tylko z graczy z min 10 meczami, zeby nie bylo zbyt trudno
+                    df_w_agg = df_w.groupby('Zawodnik_Clean').size()
+                    valid_for_kf = df_w_agg[df_w_agg >= 10].index.tolist()
+                    if valid_for_kf:
+                        target = random.choice(valid_for_kf)
+                        st.session_state['kf_target_name'] = target
+                        st.session_state['kf_target_norm'] = normalize_name(target)
+                        st.session_state['kf_guessed_letters'] = set()
+                        st.session_state['kf_mistakes'] = 0
+                        st.session_state['kf_active'] = True
+                        st.rerun()
+                    else:
+                        st.error("Brak zawodników spełniających kryteria.")
+
+            if st.session_state.get('kf_active'):
+                target_norm = st.session_state['kf_target_norm']
+                target_original = st.session_state['kf_target_name']
+                guessed = st.session_state['kf_guessed_letters']
+                mistakes = st.session_state['kf_mistakes']
+                max_mistakes = 7
+
+                # Budowanie ukrytego słowa
+                display_word = ""
+                won = True
+                for char, norm_char in zip(target_original, target_norm):
+                    if norm_char == ' ':
+                        display_word += "&nbsp;&nbsp;"
+                    elif norm_char == '-':
+                        display_word += "- "
+                    elif norm_char in guessed:
+                        display_word += f"{char.upper()} "
+                    else:
+                        display_word += "_ "
+                        won = False
+
+                st.markdown(f"""
+                <div style="text-align:center; padding:30px; font-size: 2em; letter-spacing: 5px; font-family: monospace; background: var(--secondary-background-color); border: 1px solid #444; border-radius: 10px; margin-bottom: 20px;">
+                    {display_word}
+                </div>
+                """, unsafe_allow_html=True)
+
+                if won:
+                    st.success(f"🎉 Gratulacje! Odgadłeś: **{target_original}**")
+                    if st.button("🔄 Zagraj ponownie"):
+                        st.session_state['kf_active'] = False
+                        st.rerun()
+                elif mistakes >= max_mistakes:
+                    st.error(f"💀 Koniec gry! Prawidłowa odpowiedź to: **{target_original}**")
+                    if st.button("🔄 Zagraj ponownie"):
+                        st.session_state['kf_active'] = False
+                        st.rerun()
+                else:
+                    st.warning(f"Błędy: **{mistakes}** / {max_mistakes}")
+
+                    with st.form(key="kf_form", clear_on_submit=True):
+                        c1, c2 = st.columns([3, 1])
+                        with c1:
+                            kf_input = st.text_input("Zgadnij literę lub całe hasło:", max_chars=30)
+                        with c2:
+                            st.write("")
+                            st.write("")
+                            submit_kf = st.form_submit_button("Zgadnij", use_container_width=True)
+
+                    if submit_kf and kf_input:
+                        guess_clean = normalize_name(kf_input)
+
+                        # Całe hasło
+                        if len(guess_clean) > 1:
+                            if guess_clean == target_norm.replace(' ', '').replace('-',
+                                                                                   '') or guess_clean == target_norm:
+                                for c in target_norm: st.session_state['kf_guessed_letters'].add(c)
+                                st.rerun()
+                            else:
+                                st.session_state['kf_mistakes'] += 1
+                                st.error("Złe hasło!")
+                                time.sleep(0.5)
+                                st.rerun()
+                        # Pojedyncza litera
+                        elif len(guess_clean) == 1:
+                            if guess_clean in target_norm:
+                                if guess_clean not in guessed:
+                                    st.session_state['kf_guessed_letters'].add(guess_clean)
+                                    st.rerun()
+                                else:
+                                    st.warning("Ta litera została już odgadnięta.")
+                            else:
+                                st.session_state['kf_mistakes'] += 1
+                                st.error(f"Brak litery '{kf_input.upper()}'")
+                                time.sleep(0.5)
+                                st.rerun()
