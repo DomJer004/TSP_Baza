@@ -4037,22 +4037,6 @@ elif opcja == "🎮 Zgadnij Skład":
                 - Pod każdą zagadką jest przycisk **ℹ️ Pasujących**. Dopóki nie zgadniesz tej karty, lista graczy po otwarciu jest zamazana. Znalezienie gracza na tę pozycję lub utrata żyć natychmiast odsłania wszystkie nazwiska!
                 """)
 
-            # --- DODANY TRYB DAILY ---
-            c_mode1, c_mode2 = st.columns([2, 1])
-            with c_mode1:
-                is_daily = st.toggle("📅 Tryb Daily", value=True)
-
-            today_str = datetime.date.today().strftime("%Y-%m-%d")
-    
-            played_today = False
-            if is_daily:
-                check_db = run_query("SELECT mistakes FROM daily_kontra_scores WHERE date=? AND ip_address=?",
-                                     (today_str, user_ip), fetch=True)
-                if check_db:
-                    played_today = True
-                    st.success(
-                        f"✔️ Zakończyłeś już dzisiejsze wyzwanie (Popełnione błędy: {check_db[0][0]}). Wróć jutro!")
-
             sel_era_kontra = st.selectbox("Ogranicz bazę do Ery:", list(era_options.keys()), key="era_kontra")
 
             if 'kontra_challenges' not in st.session_state: st.session_state['kontra_challenges'] = []
