@@ -3841,6 +3841,9 @@ elif opcja == "🎮 Zgadnij Skład":
 
         era_options = {
             "Wszystkie Sezony": (1900, 2100),
+            "Początki i Niższe Ligi (przed 2010)": (1990, 2010),
+            "Złota Era Ekstraklasy (11/12 - 15/16)": (2011, 2016),
+            "Droga do powrotu (16/17 - 19/20)": (2016, 2020),
             "Nowa Era (od 20/21)": (2020, 2100)
         }
 
@@ -3869,7 +3872,7 @@ elif opcja == "🎮 Zgadnij Skład":
                 if st.button("🎲 Wylosuj Mecz i Rozpocznij Grę", use_container_width=True, type="primary"):
                     starters = df_w[
                         (df_w['Status'].isin(['Cały mecz', 'Zszedł', 'Grał', 'Czerwona kartka', 'Czerwona'])) & (
-                                    df_w['Status'] != 'Wszedł')].copy()
+                                df_w['Status'] != 'Wszedł')].copy()
 
                     starters['S_Year'] = starters['Sezon'].apply(get_season_year)
                     starters = starters[(starters['S_Year'] >= min_yr) & (starters['S_Year'] <= max_yr)]
@@ -3999,7 +4002,7 @@ elif opcja == "🎮 Zgadnij Skład":
                     is_guessed = p['name'] in guessed
                     is_revealed = is_guessed or st.session_state.get('quiz_give_up')
                     flag_html = f'<img src="{p["flag"]}" width="30" style="border-radius: 3px; border: 1px solid #aaa;">' if \
-                    p['flag'] else '🏳️'
+                        p['flag'] else '🏳️'
 
                     if is_revealed:
                         bg_color = "rgba(40, 167, 69, 0.2)" if is_guessed else "rgba(220, 53, 69, 0.2)"
@@ -4033,6 +4036,23 @@ elif opcja == "🎮 Zgadnij Skład":
                 - **Uwaga na duble:** Ten sam zawodnik nie może zostać wpisany do jedenastki dwukrotnie!
                 - Pod każdą zagadką jest przycisk **ℹ️ Pasujących**. Dopóki nie zgadniesz tej karty, lista graczy po otwarciu jest zamazana. Znalezienie gracza na tę pozycję lub utrata żyć natychmiast odsłania wszystkie nazwiska!
                 """)
+
+            # --- DODANY TRYB DAILY ---
+            c_mode1, c_mode2 = st.columns([2, 1])
+            with c_mode1:
+                is_daily = st.toggle("📅 Tryb Daily", value=True)
+
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+            user_ip = get_client_ip()
+
+            played_today = False
+            if is_daily:
+                check_db = run_query("SELECT mistakes FROM daily_kontra_scores WHERE date=? AND ip_address=?",
+                                     (today_str, user_ip), fetch=True)
+                if check_db:
+                    played_today = True
+                    st.success(
+                        f"✔️ Zakończyłeś już dzisiejsze wyzwanie (Popełnione błędy: {check_db[0][0]}). Wróć jutro!")
 
             sel_era_kontra = st.selectbox("Ogranicz bazę do Ery:", list(era_options.keys()), key="era_kontra")
 
@@ -4114,7 +4134,7 @@ elif opcja == "🎮 Zgadnij Skład":
                         if 'Polska' not in nat: tags['nat'].append("Obcokrajowiec")
                         if kraj_lower in eu_countries: tags['nat'].append("Obywatel UE")
                         if kraj_lower in eu_countries or kraj_lower in europe_non_eu: tags['nat'].append("Kraj: Europa")
-                        if kraj_lower in v4_countries: tags['nat'].append("Grupa Wyszehradzka (V4)")
+                        if kraj_lower in v4_countries: tags['nat'].append("Grupa Wyszehradzka")
                         if kraj_lower in africa_countries: tags['nat'].append("Kraj: Afryka")
                         if kraj_lower in south_america: tags['nat'].append("Kraj: Ameryka Południowa")
 
@@ -4171,7 +4191,8 @@ elif opcja == "🎮 Zgadnij Skład":
 
                     catalog.append({
                         'name': name, 'tags': tags,
-                        'flag': get_flag_url(nat) if 'get_flag_url' in globals() else None
+                        'flag': get_flag_url(nat) if 'get_flag_url' in globals() else None,
+                        'matches': m
                     })
 
                 valid_pairs = []
@@ -4233,39 +4254,70 @@ elif opcja == "🎮 Zgadnij Skład":
                                     'pos': target_pos,
                                     'pair': pair,
                                     'valid_names': unique_names,
-                                    'valid_full_data': matching_players,  # Tu już nie ma duplikatów z df_p
+                                    'valid_full_data': matching_players,
                                     'rarity': rar,
                                     'count': count,
                                     'solved': False,
                                     'guessed_name': None,
-                                    'guessed_flag': None
+                                    'guessed_flag': None,
+                                    'guessed_matches': 0
                                 })
                                 found = True
                 return valid_pairs
 
 
+            def initialize_kontra():
+                if is_daily:
+                    random.seed(today_str)
+                else:
+                    random.seed()
+
+                challs = generate_kontra_challenges(sel_era_kontra)
+                random.seed()
+                return challs
+
+
+            if 'kontra_challenges' not in st.session_state or st.session_state.get('kontra_last_mode') != is_daily:
+                with st.spinner("Tasowanie kart..."):
+                    st.session_state['kontra_challenges'] = initialize_kontra()
+                    st.session_state['kontra_used_players'] = []
+                    st.session_state['kontra_mistakes'] = 0
+                    st.session_state['kontra_game_over'] = False
+                    st.session_state['kontra_last_mode'] = is_daily
+
             col_btn1, col_btn2 = st.columns([2, 3])
             with col_btn1:
-                if st.button("🔄 Wylosuj Nową Jedenastkę", type="primary"):
+                btn_disabled = is_daily
+                if st.button("🔄 Wylosuj Nową", type="primary", disabled=btn_disabled):
                     with st.spinner("Tasowanie kart..."):
-                        st.session_state['kontra_challenges'] = generate_kontra_challenges(sel_era_kontra)
+                        st.session_state['kontra_challenges'] = initialize_kontra()
                         st.session_state['kontra_used_players'] = []
                         st.session_state['kontra_mistakes'] = 0
                         st.session_state['kontra_game_over'] = False
                         st.rerun()
             with col_btn2:
-                if st.button("🏳️ Poddaję się", type="secondary"):
+                if st.button("🏳️ Poddaję się", type="secondary", disabled=played_today):
                     st.session_state['kontra_game_over'] = True
+                    if is_daily and not played_today:
+                        run_query(
+                            "INSERT OR IGNORE INTO daily_kontra_scores (date, ip_address, mistakes) VALUES (?, ?, ?)",
+                            (today_str, user_ip, 99))
                     st.rerun()
 
             if not st.session_state['kontra_challenges']:
                 with st.spinner("Tasowanie kart..."):
-                    st.session_state['kontra_challenges'] = generate_kontra_challenges(sel_era_kontra)
+                    st.session_state['kontra_challenges'] = initialize_kontra()
 
             max_mistakes = 15
             current_mistakes = st.session_state.get('kontra_mistakes', 0)
             lives_left = max_mistakes - current_mistakes
-            if lives_left <= 0: st.session_state['kontra_game_over'] = True
+
+            if lives_left <= 0 and not st.session_state.get('kontra_game_over'):
+                st.session_state['kontra_game_over'] = True
+                if is_daily and not played_today:
+                    run_query("INSERT OR IGNORE INTO daily_kontra_scores (date, ip_address, mistakes) VALUES (?, ?, ?)",
+                              (today_str, user_ip, 99))
+
             game_over = st.session_state.get('kontra_game_over', False)
 
             if game_over:
@@ -4285,22 +4337,35 @@ elif opcja == "🎮 Zgadnij Skład":
                 """, unsafe_allow_html=True)
 
                 if chal['solved']:
+                    matches = chal.get('guessed_matches', 0)
+                    if matches >= 100:
+                        bg_c, brd_c, txt_c, rar_txt = "linear-gradient(135deg, #FFD700 0%, #DAA520 100%)", "#B8860B", "#000", "👑 Legenda (100+ spotkań)"
+                    elif matches >= 50:
+                        bg_c, brd_c, txt_c, rar_txt = "linear-gradient(135deg, #8A2BE2 0%, #4B0082 100%)", "#9400D3", "#FFF", "🟣 Epicki (50-99 spotkań)"
+                    elif matches >= 20:
+                        bg_c, brd_c, txt_c, rar_txt = "linear-gradient(135deg, #1E90FF 0%, #0000CD 100%)", "#4169E1", "#FFF", "🔵 Rzadki (20-49 spotkań)"
+                    else:
+                        bg_c, brd_c, txt_c, rar_txt = "linear-gradient(135deg, #808080 0%, #696969 100%)", "#A9A9A9", "#FFF", "⚪ Zwykły (<20 spotkań)"
+
                     flag_html = f'<img src="{chal["guessed_flag"]}" style="width:20px; border-radius:2px; margin-right:5px;">' if \
                     chal['guessed_flag'] else '🏁'
+
                     st.markdown(f"""
-                    <div style='text-align:center; background:#28a74530; border:1px solid #28a745; padding:8px; border-radius:5px; margin-bottom:10px;'>
-                        {flag_html} <b>{chal['guessed_name']}</b><br>
-                        <small style="color:gray;">{chal['rarity']}</small>
+                    <div style='text-align:center; background:{bg_c}; color:{txt_c}; border:2px solid {brd_c}; padding:8px; border-radius:8px; margin-bottom:10px; box-shadow: 0 4px 10px rgba(0,0,0,0.4); text-shadow: 1px 1px 2px rgba(0,0,0,0.3)'>
+                        {flag_html} <b style="font-size: 1.1em;">{chal['guessed_name']}</b><br>
+                        <small style="opacity: 0.9; font-weight: bold;">{rar_txt}</small>
                     </div>
                     """, unsafe_allow_html=True)
                 elif not game_over:
+                    should_disable = played_today or game_over
                     with st.form(key=f"k_form_{idx}", clear_on_submit=True):
                         col_i, col_b = st.columns([3, 1])
                         with col_i:
                             guess_k = st.text_input("Kto to jest?", label_visibility="collapsed",
-                                                    placeholder="Nazwisko gracza (Enter)...")
+                                                    placeholder="Nazwisko gracza (Enter)...", disabled=should_disable)
                         with col_b:
-                            submit_k = st.form_submit_button("Sprawdź", use_container_width=True)
+                            submit_k = st.form_submit_button("Sprawdź", use_container_width=True,
+                                                             disabled=should_disable)
 
                     if submit_k and guess_k:
                         guess_clean = normalize_name(guess_k)
@@ -4321,10 +4386,15 @@ elif opcja == "🎮 Zgadnij Skład":
                                     chal['solved'] = True
                                     chal['guessed_name'] = hit_player['name']
                                     chal['guessed_flag'] = hit_player['flag']
+                                    chal['guessed_matches'] = hit_player['matches']
                                     st.session_state['kontra_used_players'].append(hit_player['name'])
 
                                     if all(c['solved'] for c in st.session_state['kontra_challenges']):
                                         st.balloons()
+                                        if is_daily and not played_today:
+                                            run_query(
+                                                "INSERT OR IGNORE INTO daily_kontra_scores (date, ip_address, mistakes) VALUES (?, ?, ?)",
+                                                (today_str, user_ip, st.session_state['kontra_mistakes']))
                                     st.rerun()
                             else:
                                 st.session_state['kontra_mistakes'] += 1
@@ -4333,7 +4403,7 @@ elif opcja == "🎮 Zgadnij Skład":
                         else:
                             st.toast("⚠️ Wpisz co najmniej 3 znaki.", icon="⚠️")
 
-                # POPOVER (Przycisk podpowiedzi) - dynamiczne ukrywanie zużytych graczy
+                # POPOVER (Przycisk podpowiedzi)
                 with st.popover(f"ℹ️ Pasujących: {chal['count']}", use_container_width=True):
                     st.markdown("**Lista graczy spełniających warunki:**")
 
@@ -4341,7 +4411,6 @@ elif opcja == "🎮 Zgadnij Skład":
                     to_display = []
                     for p in chal['valid_full_data']:
                         if p['name'] not in seen:
-                            # Dynamiczne ukrywanie graczy: jeśli w grze zużyłeś gracza do INNEJ karty, nie pojawia się on tu jako podpowiedź
                             if not chal['solved'] and not game_over and p['name'] in st.session_state[
                                 'kontra_used_players']:
                                 seen.add(p['name'])
@@ -4355,7 +4424,6 @@ elif opcja == "🎮 Zgadnij Skład":
 
                     for p_data in sorted(to_display, key=lambda x: x['name']):
                         f_url = p_data.get('flag', '')
-                        # Odsłanianie po rozwiązaniu LUB po poddaniu się (Game Over)
                         if chal['solved'] or game_over:
                             f_tag = f"<img src='{f_url}' width='20' style='border-radius: 2px; margin-right: 8px;'>" if f_url else "🏳️"
                             st.markdown(
