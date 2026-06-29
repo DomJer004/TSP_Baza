@@ -25,38 +25,39 @@ def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
-    # Tabela użytkowników
-    c.execute('''CREATE TABLE IF NOT EXISTS users 
-                     (username TEXT PRIMARY KEY, password TEXT, join_date TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS attendance 
-                     (username TEXT, match_id TEXT, date TEXT, UNIQUE(username, match_id))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS comments 
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT, match_id TEXT, username TEXT, comment TEXT, timestamp TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS favorites 
-                     (username TEXT, player_name TEXT, UNIQUE(username, player_name))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS dream_team 
-                     (username TEXT PRIMARY KEY, formation TEXT, gk TEXT, 
-                      def1 TEXT, def2 TEXT, def3 TEXT, def4 TEXT, 
-                      mid1 TEXT, mid2 TEXT, mid3 TEXT, mid4 TEXT, 
-                      fwd1 TEXT, fwd2 TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS quiz_results 
-                     (username TEXT, score INTEGER, date TEXT)''')
+    # (Twoje poprzednie tabele...)
+    c.execute('''CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, join_date TEXT)''')
+    c.execute(
+        '''CREATE TABLE IF NOT EXISTS attendance (username TEXT, match_id TEXT, date TEXT, UNIQUE(username, match_id))''')
+    c.execute(
+        '''CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, match_id TEXT, username TEXT, comment TEXT, timestamp TEXT)''')
+    c.execute(
+        '''CREATE TABLE IF NOT EXISTS favorites (username TEXT, player_name TEXT, UNIQUE(username, player_name))''')
+    c.execute(
+        '''CREATE TABLE IF NOT EXISTS dream_team (username TEXT PRIMARY KEY, formation TEXT, gk TEXT, def1 TEXT, def2 TEXT, def3 TEXT, def4 TEXT, mid1 TEXT, mid2 TEXT, mid3 TEXT, mid4 TEXT, fwd1 TEXT, fwd2 TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS quiz_results (username TEXT, score INTEGER, date TEXT)''')
+    c.execute(
+        '''CREATE TABLE IF NOT EXISTS user_questions (id INTEGER PRIMARY KEY AUTOINCREMENT, question TEXT, correct_ans TEXT, wrong_a TEXT, wrong_b TEXT, author TEXT, added_date TEXT)''')
 
-    # Tabela pytań użytkowników
-    c.execute('''CREATE TABLE IF NOT EXISTS user_questions 
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                      question TEXT, 
-                      correct_ans TEXT, 
-                      wrong_a TEXT, 
-                      wrong_b TEXT, 
-                      author TEXT,
-                      added_date TEXT)''')
+    # --- NOWA TABELA DLA TRYBU DAILY ---
+    c.execute(
+        '''CREATE TABLE IF NOT EXISTS daily_kontra_scores (date TEXT, ip_address TEXT, mistakes INTEGER, UNIQUE(date, ip_address))''')
 
     conn.commit()
     conn.close()
 
 
 init_db()  # Uruchom przy starcie
+
+
+# --- NOWA FUNKCJA DO POBIERANIA IP ---
+def get_client_ip():
+    try:
+        # Działa w nowszych wersjach Streamlit (od 1.37+)
+        ip = st.context.headers.get("X-Forwarded-For", st.context.headers.get("Remote-Addr", "unknown"))
+        return ip.split(',')[0].strip() if ',' in ip else ip
+    except:
+        return "unknown_ip"
 
 
 # Funkcje pomocnicze do bazy
@@ -1051,6 +1052,397 @@ def parse_result(val):
 
 def render_match_report_logic(match_label, squad_df):
     import urllib.parse
+    import re
+    target_date = None
+    rival_raw = ""
+    competition_info = ""
+    match_result = ""
+    is_home_match = True  # Domyślnie zakładamy dom
+
+    if not squad_df.empty:
+        if 'Data_Sort' in squad_df.columns:
+            try:
+                dt_val = squad_df.iloc[0]['Data_Sort']
+                if pd.notna(dt_val):
+                    target_date = pd.to_datetime(dt_val).date()
+            except:
+                pass
+
+        # Sprawdzanie gospodarza z pliku wystepy.csv
+        if 'Przeciwnik' in squad_df.columns:
+            rival_raw = str(squad_df.iloc[0]['Przeciwnik']).strip()
+            if 'Rola' in squad_df.columns:
+                rola_val = str(squad_df.iloc[0]['Rola']).lower()
+                if 'gość' in rola_val or 'wyjazd' in rola_val:
+                    is_home_match = False
+        elif 'Gospodarz' in squad_df.columns and 'Gość' in squad_df.columns:
+            h = str(squad_df.iloc[0]['Gospodarz'])
+            g = str(squad_df.iloc[0]['Gość'])
+            my_aliases = ['podbeskidzie', 'tsp', 'bielsko']
+            if any(x in h.lower() for x in my_aliases):
+                rival_raw = g
+                is_home_match = True
+            elif any(x in g.lower() for x in my_aliases):
+                rival_raw = h
+                is_home_match = False
+            else:
+                rival_raw = g
+
+    if not target_date:
+        try:
+            date_part = match_label.split('|')[0].strip()
+            target_date = pd.to_datetime(date_part, dayfirst=True).date()
+        except:
+            pass
+
+    def aggressive_date_parse(val):
+        if pd.isna(val) or str(val).strip() in ['', '-', 'nan']: return None
+        s = str(val).strip().lower()
+        if ',' in s: s = s.split(',', 1)[1].strip()
+        if ':' in s and len(s.split()) > 1: s = " ".join(s.split()[:-1])
+        months_map = {
+            'stycznia': '01', 'lutego': '02', 'marca': '03', 'kwietnia': '04',
+            'maja': '05', 'czerwca': '06', 'lipca': '07', 'sierpnia': '08',
+            'września': '09', 'października': '10', 'listopada': '11', 'grudnia': '12'
+        }
+        for pl, digit in months_map.items():
+            if pl in s:
+                s = s.replace(pl, digit)
+                break
+        s = re.sub(r'\s+', '.', s).strip()
+        for fmt in ['%d.%m.%Y', '%Y-%m-%d', '%d-%m-%Y', '%Y.%m.%d', '%d %m %Y']:
+            try:
+                return pd.to_datetime(s, format=fmt).date()
+            except:
+                continue
+        try:
+            return pd.to_datetime(s).date()
+        except:
+            return None
+
+    raw_scorers = "-"
+    df_matches = load_data("mecze.csv")
+
+    if df_matches is not None and target_date:
+        col_d = next((c for c in df_matches.columns if c in ['data meczu', 'data', 'dt_obj']), None)
+        if col_d:
+            df_matches['clean_date'] = df_matches[col_d].apply(aggressive_date_parse)
+            s_win = target_date - datetime.timedelta(days=1)
+            e_win = target_date + datetime.timedelta(days=1)
+            match_row = df_matches[(df_matches['clean_date'] >= s_win) & (df_matches['clean_date'] <= e_win)]
+
+            if len(match_row) > 1 and rival_raw:
+                def norm(txt):
+                    return str(txt).lower().replace('ks ', '').replace('mks ', '').replace('gks ', '').strip()
+
+                r_target = norm(rival_raw)
+                if 'rywal' in match_row.columns:
+                    match_row = match_row[
+                        match_row['rywal'].apply(lambda x: r_target in norm(x) or norm(x) in r_target)]
+
+            if not match_row.empty:
+                # Zczytujemy wynik oraz weryfikujemy z mecze.csv czy graliśmy u siebie
+                match_result = str(match_row.iloc[0].get('wynik', '')).strip()
+
+                dom_val = str(match_row.iloc[0].get('dom', '1')).lower()
+                if dom_val in ['0', 'false', 'nie', 'wyjazd', 'w']:
+                    is_home_match = False
+                else:
+                    is_home_match = True
+
+                raw_scorers_val = match_row.iloc[0].get('strzelcy', '-')
+                if raw_scorers_val not in ['-', 'nan', '', 'NaN']:
+                    raw_scorers = str(raw_scorers_val)
+
+                comp_col = next(
+                    (c for c in match_row.columns if c.lower().strip() in ['rozgrywki', 'liga', 'kolejka', 'typ']),
+                    None)
+                if comp_col:
+                    comp_val = str(match_row.iloc[0][comp_col]).strip()
+                    if comp_val and comp_val.lower() not in ['nan', '-', '']:
+                        competition_info = f" | 🏆 {comp_val}"
+
+    coach_name = None
+    df_coaches = load_data("trenerzy.csv")
+
+    if df_coaches is not None and target_date:
+        col_start = next((c for c in df_coaches.columns if c in ['początek', 'start']), None)
+        col_end = next((c for c in df_coaches.columns if c in ['koniec', 'end']), None)
+        if col_start:
+            for _, c_row in df_coaches.iterrows():
+                try:
+                    s_date = aggressive_date_parse(c_row[col_start])
+                    if not s_date: continue
+                    if col_end and pd.notna(c_row[col_end]):
+                        e_date = aggressive_date_parse(c_row[col_end])
+                    else:
+                        e_date = datetime.date.today() + datetime.timedelta(days=365)
+
+                    if s_date <= target_date <= e_date:
+                        coach_name = c_row['imię i nazwisko']
+                        break
+                except:
+                    continue
+
+    try:
+        parts = match_label.split('|')
+        info_s = parts[1].strip() if len(parts) > 1 else match_label
+        date_s = parts[0].strip()
+    except:
+        info_s = match_label
+        date_s = str(target_date) if target_date else "-"
+
+    avg_age_str = ""
+    df_p_bio = load_data("pilkarze.csv")
+    if df_p_bio is not None and target_date and not squad_df.empty:
+        df_p_bio['join_key'] = df_p_bio['imię i nazwisko'].astype(str).str.lower().str.strip()
+        col_b = next((c for c in df_p_bio.columns if c in ['data urodzenia', 'urodzony', 'data_ur']), None)
+        if col_b:
+            starters = squad_df[
+                (squad_df['Status'].isin(['Cały mecz', 'Zszedł', 'Grał', 'Czerwona kartka', 'Czerwona'])) & (
+                        squad_df['Status'] != 'Wszedł')].copy()
+            starters['join_key'] = starters['Zawodnik_Clean'].astype(str).str.lower().str.strip()
+            merged_starters = pd.merge(starters, df_p_bio[['join_key', col_b]], on='join_key', how='left')
+
+            def calc_age_at_match(row):
+                if pd.isna(row[col_b]): return None
+                try:
+                    bdate = pd.to_datetime(row[col_b], dayfirst=True)
+                    mdate = pd.to_datetime(target_date)
+                    return (mdate - bdate).days / 365.25
+                except:
+                    return None
+
+            merged_starters['age_at_match'] = merged_starters.apply(calc_age_at_match, axis=1)
+            valid_ages = merged_starters['age_at_match'].dropna()
+
+            if len(valid_ages) >= 8:
+                mean_age = valid_ages.mean()
+                mean_age_fmt = f"{mean_age:.2f}".replace('.', ',')
+                avg_age_str = f" | 📊 Śr. wieku XI: <b>{mean_age_fmt} lat</b>"
+
+    # ==========================================
+    # LINK DO 90MINUT.PL (AUTO-PRZEKIEROWANIE DO MECZU)
+    # ==========================================
+    link_90minut = ""
+    if target_date and target_date.year >= 2002 and rival_raw:
+        score_for_query = ""
+        if match_result and match_result not in ['-', 'nan']:
+            # Wynik u nas w bazie jest jako TSP - Rywal, 90minut wymaga Gospodarz - Gość
+            m_score = re.search(r'(\d+)[:\-](\d+)', match_result)
+            if m_score:
+                tsp_g = m_score.group(1)
+                riv_g = m_score.group(2)
+                if is_home_match:
+                    score_for_query = f"{tsp_g}-{riv_g}"
+                else:
+                    score_for_query = f"{riv_g}-{tsp_g}"
+            else:
+                score_for_query = match_result
+
+        # Układamy poprawną nazwę meczu Gospodarz Gość Wynik
+        if is_home_match:
+            query_str = f"Podbeskidzie {rival_raw}"
+        else:
+            query_str = f"{rival_raw} Podbeskidzie"
+
+        if score_for_query:
+            query_str += f" {score_for_query}"
+
+        safe_query = urllib.parse.quote_plus(f"!ducky site:90minut.pl {query_str}")
+        url_90minut = f"https://duckduckgo.com/?q={safe_query}"
+
+        link_90minut = f" | <a href='{url_90minut}' target='_blank' style='color: #3498db; text-decoration: none;'>🔗 90minut.pl</a>"
+
+    st.markdown(f"""
+    <div style="text-align: center; padding: 15px; background-color: rgba(40, 167, 69, 0.1); border: 1px solid #28a745; border-radius: 8px; margin-bottom: 10px;">
+        <h3 style="margin:0; color: var(--text-color);">{info_s}</h3>
+        <p style="color: gray; margin: 4px 0 0 0; font-size: 0.85em;">📅 {date_s}{competition_info}{avg_age_str}{link_90minut}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if raw_scorers and raw_scorers != '-' and str(raw_scorers).lower() != 'nan':
+        st.markdown("#### 🥅 Strzelcy")
+        scorers_list = extract_scorers_list(raw_scorers)
+        if scorers_list:
+            cols_sc = st.columns(4)
+            for idx, item in enumerate(scorers_list):
+                col_idx = idx % 4
+                with cols_sc[col_idx]:
+                    if item['is_own']:
+                        st.error(item['display'])
+                    else:
+                        if st.button(item['display'],
+                                     key=f"rep_sc_{match_label}_{idx}_{item['link_name']}_{st.session_state.get('uploader_key', 0)}",
+                                     use_container_width=True):
+                            st.session_state['cm_selected_player'] = item['link_name']
+                            st.rerun()
+        else:
+            st.write(raw_scorers)
+        st.divider()
+
+    if coach_name:
+        _, c_btn, _ = st.columns([1, 2, 1])
+        with c_btn:
+            if st.button(f"👔 Trener: {coach_name}",
+                         key=f"coach_btn_{match_label}_fix_{st.session_state.get('uploader_key', 0)}",
+                         use_container_width=True):
+                st.session_state['selected_coach'] = coach_name
+                st.session_state['coach_view_mode'] = 'profile'
+                st.session_state['opcja'] = 'Trenerzy'
+                st.rerun()
+
+    if squad_df.empty:
+        st.warning("Brak szczegółowego składu.")
+        return
+
+    map_in_to_out = {}
+    map_out_to_in = {}
+
+    sort_c = 'Minuta_Zmiany_Real' if 'Minuta_Zmiany_Real' in squad_df.columns else 'Wejście'
+    in_rows = squad_df[squad_df['Status'] == 'Wszedł'].sort_values(sort_c)
+    out_rows = squad_df[squad_df['Status'] == 'Zszedł'].sort_values(sort_c)
+    used_out = []
+
+    for _, row_in in in_rows.iterrows():
+        t_in = row_in.get(sort_c, 0)
+        cands = out_rows[~out_rows.index.isin(used_out)].copy()
+        cands['diff'] = (cands.get(sort_c, 999) - t_in).abs()
+        cands = cands[cands['diff'] <= 5].sort_values('diff')
+
+        if not cands.empty:
+            best = cands.iloc[0]
+            map_in_to_out[row_in['Zawodnik_Clean']] = best['Zawodnik_Clean']
+            map_out_to_in[best['Zawodnik_Clean']] = row_in['Zawodnik_Clean']
+            used_out.append(best.name)
+
+    timeline_events = []
+
+    if raw_scorers and raw_scorers not in ['-', 'nan']:
+        parts = raw_scorers.split(',')
+        for p in parts:
+            m_search = re.search(r'(\d+)', p)
+            if m_search:
+                minute = int(m_search.group(1))
+                icon = "⚽"
+                if "(s)" in p.lower() or "s." in p.lower() or "sam" in p.lower():
+                    icon = "🔴"
+                elif "(k)" in p.lower() or "k." in p.lower() or "kar" in p.lower():
+                    icon = "⚽"
+
+                clean_name = re.sub(r'\d+', '', p).replace('(k)', '').replace('k.', '').replace('(s)', '').replace('s.',
+                                                                                                                   '').replace(
+                    'sam.', '').replace("'", "").replace("(", "").replace(")", "").strip()
+                timeline_events.append(
+                    {'min': minute, 'icon': icon, 'text': f"Gol: <b>{clean_name}</b>", 'type': 'goal'})
+
+    for _, row_in in in_rows.iterrows():
+        m = int(row_in.get('Minuta_Zmiany_Real', 0))
+        if m > 0:
+            p_in = row_in['Zawodnik_Clean']
+            p_out = map_in_to_out.get(p_in, 'Nieznany')
+            timeline_events.append({'min': m, 'icon': '🔄',
+                                    'text': f"<span style='color:#28a745;'>⬆️ {p_in}</span> | <span style='color:#dc3545;'>⬇️ {p_out}</span>",
+                                    'type': 'sub'})
+
+    for _, r in squad_df.iterrows():
+        status = r.get('Status', '')
+        if r.get('Czerwone', 0) > 0 or status in ['Czerwona', 'Czerwona kartka']:
+            m = int(r.get('Minuta_Zmiany_Real', 0))
+            if m == 0 and int(r.get('Minuty', 0)) > 0: m = int(r.get('Minuty', 0))
+            if m > 0:
+                timeline_events.append(
+                    {'min': m, 'icon': '🟥', 'text': f"Czerwona kartka: <b>{r['Zawodnik_Clean']}</b>", 'type': 'red'})
+
+    if timeline_events:
+        timeline_events.sort(key=lambda x: x['min'])
+
+        html_tl = "<div style='margin: 30px 0; padding: 20px; background-color: var(--secondary-background-color); border: 1px solid #444; border-radius: 8px;'>"
+        html_tl += "<h4 style='text-align: center; margin-bottom: 25px;'>⏱️ Oś Czasu Zdarzeń</h4>"
+        html_tl += "<div style='position: relative; padding-left: 40px; max-width: 600px; margin: 0 auto;'>"
+        html_tl += "<div style='position: absolute; left: 18px; top: 0; bottom: 0; width: 4px; background: #555; border-radius: 2px;'></div>"
+
+        for ev in timeline_events:
+            bg_col = "#dc3545" if ev['type'] == 'red' else ("#28a745" if ev['type'] == 'goal' else "#3498db")
+            html_tl += f"<div style='position: relative; margin-bottom: 20px; display: flex; align-items: center; background: rgba(255,255,255,0.05); border: 1px solid #444; border-radius: 8px; padding: 10px;'>"
+            html_tl += f"<div style='position: absolute; left: -40px; width: 36px; height: 36px; background: {bg_col}; border: 3px solid var(--secondary-background-color); border-radius: 50%; text-align: center; color: white; font-size: 0.9em; font-weight: bold; line-height: 30px; z-index: 2; box-shadow: 0 0 5px rgba(0,0,0,0.5);'>{ev['min']}'</div>"
+            html_tl += f"<div style='font-size: 1.3em; margin-right: 15px;'>{ev['icon']}</div>"
+            html_tl += f"<div style='font-size: 1em;'>{ev['text']}</div>"
+            html_tl += "</div>"
+
+        html_tl += "</div></div>"
+        st.markdown(html_tl, unsafe_allow_html=True)
+        st.divider()
+
+    def render_row(row, is_sub=False):
+        c1, c2, c3 = st.columns([1, 4, 3])
+        mins = int(row.get('Minuty', 0))
+        entry = int(row.get('Minuta_Zmiany_Real', 0)) if is_sub else 0
+        name = row['Zawodnik_Clean']
+        status = row.get('Status', '')
+
+        with c1:
+            if is_sub:
+                st.caption(f"{entry}'" if entry > 0 else "-")
+            else:
+                st.write(f"{mins}'" if mins > 0 else "-")
+
+        with c2:
+            if st.button(name, key=f"p_{match_label}_{name}_{is_sub}_{st.session_state.get('uploader_key', 0)}"):
+                st.session_state['cm_selected_player'] = name
+                st.rerun()
+
+        evs = []
+        g = int(row.get('Gole', 0))
+        if g > 0: evs.append(f"<span style='color:#28a745; font-weight:bold;'>{'⚽' * g}</span>")
+
+        y = int(row.get('Żółte', 0))
+        if y > 0: evs.append(f"🟨{'x' + str(y) if y > 1 else ''}")
+
+        r = int(row.get('Czerwone', 0))
+        if r > 0 or status in ['Czerwona kartka', 'Czerwona']: evs.append("🟥")
+
+        if is_sub:
+            rep = map_in_to_out.get(name)
+            txt = f"za: {rep}" if rep else "Wejście"
+            evs.append(f"<small style='color:#28a745'>⬆️ {txt}</small>")
+        elif status == 'Zszedł':
+            rep = map_out_to_in.get(name)
+            txt = f"zm: {rep}" if rep else "Zejście"
+            out_min = int(row.get('Minuta_Zmiany_Real', 0))
+            t_info = f"({out_min}')" if out_min > 0 else ""
+            evs.append(f"<small style='color:#dc3545'>⬇️ {txt} {t_info}</small>")
+        elif status in ['Czerwona kartka', 'Czerwona']:
+            out_min = int(row.get('Minuta_Zmiany_Real', 0))
+            if out_min == 0 and mins > 0: out_min = mins
+            t_info = f"({out_min}')" if out_min > 0 else ""
+            evs.append(f"<small style='color:#dc3545'>🟥 Zejście {t_info}</small>")
+
+        with c3:
+            if evs: st.markdown(" ".join(evs), unsafe_allow_html=True)
+
+    starters = squad_df[(squad_df['Status'].isin(['Cały mecz', 'Zszedł', 'Grał', 'Czerwona kartka', 'Czerwona'])) & (
+            squad_df['Status'] != 'Wszedł')].sort_values('File_Order')
+    subs = squad_df[squad_df['Status'] == 'Wszedł'].sort_values(
+        'Minuta_Zmiany_Real' if 'Minuta_Zmiany_Real' in squad_df.columns else 'Wejście')
+    unused = squad_df[squad_df['Status'] == 'Rezerwowy']
+
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.caption("🏟️ Wyjściowa XI")
+        for _, r in starters.iterrows(): render_row(r, False)
+    with col_r:
+        st.caption("🔄 Zmiennicy")
+        if not subs.empty:
+            for _, r in subs.iterrows(): render_row(r, True)
+        else:
+            st.text("Brak zmian")
+        if not unused.empty:
+            st.markdown("---")
+            st.caption("💤 Ławka")
+            for _, r in unused.iterrows(): st.text(f"{r['Zawodnik_Clean']}")
+
+    import urllib.parse
     target_date = None
     rival_raw = ""
     competition_info = ""
@@ -1131,7 +1523,6 @@ def render_match_report_logic(match_label, squad_df):
                         match_row['rywal'].apply(lambda x: r_target in norm(x) or norm(x) in r_target)]
 
             if not match_row.empty:
-                # Zczytujemy z bazy konkretny wynik oraz rozgrywki
                 match_result = str(match_row.iloc[0].get('wynik', '')).strip()
                 raw_scorers_val = match_row.iloc[0].get('strzelcy', '-')
                 if raw_scorers_val not in ['-', 'nan', '', 'NaN']:
@@ -1204,18 +1595,22 @@ def render_match_report_logic(match_label, squad_df):
                 mean_age_fmt = f"{mean_age:.2f}".replace('.', ',')
                 avg_age_str = f" | 📊 Śr. wieku XI: <b>{mean_age_fmt} lat</b>"
 
-    # ==========================================
-    # LINK DO 90MINUT.PL Z WYNIKIEM Z BAZY
-    # ==========================================
-    link_90minut = ""
-    if target_date and target_date.year >= 2002 and rival_raw:
-        query_str = f"Podbeskidzie {rival_raw}"
-        if match_result and match_result not in ['-', 'nan']:
-            query_str += f" {match_result}"
+        # ==========================================
+        # LINK DO 90MINUT.PL (AUTO-PRZEKIEROWANIE DO MECZU)
+        # ==========================================
+        link_90minut = ""
+        if target_date and target_date.year >= 2002 and rival_raw:
+            # Tworzymy bardzo precyzyjne zapytanie z nazwą rywala i wynikiem
+            query_str = f"Podbeskidzie {rival_raw}"
+            if match_result and match_result not in ['-', 'nan']:
+                query_str += f" {match_result}"
 
-        safe_query = urllib.parse.quote_plus(query_str.strip())
-        url_90minut = f"https://www.google.pl/search?q=site%3A90minut.pl+{safe_query}"
-        link_90minut = f" | <a href='{url_90minut}' target='_blank' style='color: #3498db; text-decoration: none;'>🔗 90minut.pl</a>"
+            # Trik z parametrem "!ducky" (Szczęśliwy Traf).
+            # Przeszukuje 90minut.pl i OD RAZU wrzuca Cię w pierwszy trafiony link (czyli mecz.php)
+            safe_query = urllib.parse.quote_plus(f"!ducky site:90minut.pl {query_str}")
+            url_90minut = f"https://duckduckgo.com/?q={safe_query}"
+
+            link_90minut = f" | <a href='{url_90minut}' target='_blank' style='color: #3498db; text-decoration: none;'>🔗 90minut.pl</a>"
 
     st.markdown(f"""
     <div style="text-align: center; padding: 15px; background-color: rgba(40, 167, 69, 0.1); border: 1px solid #28a745; border-radius: 8px; margin-bottom: 10px;">
@@ -4036,6 +4431,23 @@ elif opcja == "🎮 Zgadnij Skład":
                 - **Uwaga na duble:** Ten sam zawodnik nie może zostać wpisany do jedenastki dwukrotnie!
                 - Pod każdą zagadką jest przycisk **ℹ️ Pasujących**. Dopóki nie zgadniesz tej karty, lista graczy po otwarciu jest zamazana. Znalezienie gracza na tę pozycję lub utrata żyć natychmiast odsłania wszystkie nazwiska!
                 """)
+
+            # --- DODANY TRYB DAILY ---
+            c_mode1, c_mode2 = st.columns([2, 1])
+            with c_mode1:
+                is_daily = st.toggle("📅 Tryb Daily", value=True)
+
+            today_str = datetime.date.today().strftime("%Y-%m-%d")
+            user_ip = get_client_ip()
+
+            played_today = False
+            if is_daily:
+                check_db = run_query("SELECT mistakes FROM daily_kontra_scores WHERE date=? AND ip_address=?",
+                                     (today_str, user_ip), fetch=True)
+                if check_db:
+                    played_today = True
+                    st.success(
+                        f"✔️ Zakończyłeś już dzisiejsze wyzwanie (Popełnione błędy: {check_db[0][0]}). Wróć jutro!")
 
             sel_era_kontra = st.selectbox("Ogranicz bazę do Ery:", list(era_options.keys()), key="era_kontra")
 
