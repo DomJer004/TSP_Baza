@@ -4043,8 +4043,7 @@ elif opcja == "🎮 Zgadnij Skład":
                 is_daily = st.toggle("📅 Tryb Daily", value=True)
 
             today_str = datetime.date.today().strftime("%Y-%m-%d")
-            user_ip = get_client_ip()
-
+    
             played_today = False
             if is_daily:
                 check_db = run_query("SELECT mistakes FROM daily_kontra_scores WHERE date=? AND ip_address=?",
