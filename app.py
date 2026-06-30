@@ -328,21 +328,50 @@ def render_player_profile(player_name):
                     except:
                         pass
 
-    c_p1, c_p2 = st.columns([1, 4])
-    nat_raw = str(row.get('Narodowość', row.get('kraj', '-')))
-
     p_total_matches = len(p_hist) if not p_hist.empty else int(pd.to_numeric(row.get('mecze', 0), errors='coerce') or 0)
     p_ppg = ((p_wins * 3) + p_draws) / p_total_matches if p_total_matches > 0 else 0.0
 
-    # Ustalanie statusu w klubie
+    # --- ZAAWANSOWANE USTALANIE STATUSU W KLUBIE ---
+    played_majority = False
+    is_new = False
+
+    if df_det_goals is not None and not p_hist.empty:
+        # 1. Sprawdzenie czy gracz był "Podstawowy" w którymkolwiek sezonie (> 50% meczów drużyny)
+        if 'Sezon' in p_hist.columns and 'Mecz_Label' in df_det_goals.columns:
+            team_matches_per_season = df_det_goals.groupby('Sezon')['Mecz_Label'].nunique()
+            player_matches_per_season = p_hist.groupby('Sezon')['Mecz_Label'].nunique()
+
+            for season, p_count in player_matches_per_season.items():
+                t_count = team_matches_per_season.get(season, 34)  # Domyślnie ok. 34 kolejki
+                if t_count > 0 and (p_count / t_count) > 0.5:
+                    played_majority = True
+                    break
+
+        # 2. Sprawdzenie czy gracz grał niedawno (Nowy nabytek / wciąż aktywny)
+        if 'Data_Sort' in p_hist.columns:
+            try:
+                last_match_date = pd.to_datetime(p_hist.iloc[-1]['Data_Sort'])
+                today_date = pd.Timestamp.today()
+                if pd.notna(last_match_date) and (today_date - last_match_date).days <= 365:
+                    is_new = True
+            except:
+                pass
+
     if p_total_matches >= 100:
         club_status = "👑 Ikona Klubu"
     elif p_total_matches >= 50:
         club_status = "🛡️ Ważne Ogniwo"
+    elif played_majority:
+        club_status = "⚡ Gracz Podstawowy"
     elif p_total_matches >= 15:
         club_status = "🔄 Gracz Rotacyjny"
+    elif is_new:
+        club_status = "🆕 Nowy Nabytek"
     else:
-        club_status = "🌱 Epizodyczny / Nowy"
+        club_status = "🌱 Gracz Epizodyczny"
+
+    c_p1, c_p2 = st.columns([1, 4])
+    nat_raw = str(row.get('Narodowość', row.get('kraj', '-')))
 
     with c_p1:
         flags_html = get_multi_flags_html(nat_raw)
@@ -631,7 +660,6 @@ def render_player_profile(player_name):
             st.info("Brak danych o kolegach.")
     else:
         st.info("Brak danych.")
-
 
 def render_coach_profile(coach_name):
     """Wyświetla profil trenera ze statystykami, historią meczów i zaawansowaną analityką."""
