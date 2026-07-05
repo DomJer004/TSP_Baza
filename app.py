@@ -4594,27 +4594,27 @@ elif opcja == "🎮 Zagadki":
     df_p = load_data("pilkarze.csv")
     df_m = load_data("mecze.csv")
 
-    # Wklejona na sztywno lista miast - brak błędu SyntaxError!
-    CITY_NAMES_UPPER = [
-        'ANDRYCHÓW', 'BEŁCHATÓW', 'BIAŁYSTOK', 'BIELAWA', 'BIERUŃ', 'BOGUCHWAŁA', 'BRENNA',
-        'BYDGOSZCZ', 'BYTOM', 'BYTÓW', 'CHEŁMEK', 'CHOJNICE', 'CHORZÓW', 'CHRZANÓW', 'CHYBIE',
-        'CZERMNO', 'CZĘSTOCHOWA', 'DANKOWICE', 'DREZDENKO', 'ELBLĄG', 'GDAŃSK', 'GDYNIA', 'GLIWICE',
-        'GORZYCE', 'GORZÓW WIELKOPOLSKI', 'GRACZE', 'GRODZISK MAZOWIECKI', 'GRODZISK WIELKOPOLSKI',
-        'GRUDZIĄDZ', 'GŁOGÓW', 'JANIKOWO', 'JASTRZĘBIE', 'JAWORZNO', 'KACZYCE', 'KALISZ',
-        'KATOWICE', 'KIELCE', 'KLECZA', 'KLECZEW', 'KLUCZBORK', 'KNURÓW', 'KONIN', 'KRAKÓW',
-        'KRZANOWICE', 'KĘDZIERZYN-KOŹLE', 'KĘTY', 'LEGNICA', 'LIBIĄŻ', 'LUBIN', 'LUBLIN', 'LĘDZINY',
-        'MIELEC', 'MILÓWKA', 'MŁAWA', 'NIECIECZA', 'NIEDOBCZYCE', 'NIEPOŁOMICE', 'NIWKA',
-        'NOWA WIEŚ', 'NOWE MIASTO LUBAWSKIE', 'NOWY DWÓR MAZOWIECKI', 'NOWY SĄCZ', 'NOWY TARG',
-        'OLEŚNICA', 'OLSZTYN', 'OPOCZNO', 'OPOLE', 'OSTROWIEC ŚWIĘTOKRZYSKI', 'OTWOCK', 'OŚWIĘCIM',
-        'PIOTRKÓW TRYBUNALSKI', 'PISARZOWICE', 'POLKOWICE', 'PORĄBKA', 'POZNAŃ', 'PRUSZKÓW',
-        'PUŁAWY', 'PŁOCK', 'RADZIONKÓW', 'RUDA ŚLĄSKA', 'RZESZÓW', 'SANOK', 'SIEDLCE', 'SIERSZA',
-        'SKIERNIEWICE', 'SKOCZÓW', 'SOSNOWIEC', 'STALOWA WOLA', 'STANISŁAW', 'STRUMIEŃ', 'STRÓŻE',
-        'SUCHA BESKIDZKA', 'SUWAŁKI', 'SZCZECIN', 'TUREK', 'TYCHY', 'USTROŃ', 'WADOWICE',
-        'WARSZAWA', 'WAŁBRZYCH', 'WIEPRZ', 'WIKIELEC', 'WODZISŁAW ŚLĄSKI', 'WROCŁAW',
-        'WĘGIERSKA GÓRKA', 'WŁOCŁAWEK', 'ZABIERZÓW', 'ZABRZE', 'ZAMOŚĆ', 'ZAWIERCIE', 'ZEMBRZYCE',
-        'ZIELONA GÓRA', 'ZĄBKI', 'ŁOMŻA', 'ŁOWICZ', 'ŁÓDŹ', 'ŁĘCZNA', 'ŚWIEBODZIN', 'ŚWINOUJŚCIE',
-        'ŻAGAŃ', 'ŻARY', 'ŻYWIEC'
-    ]
+    try:
+        CITY_NAMES_UPPER = [c.upper() for c in CITY_COORDS.keys()]
+    except NameError:
+        CITY_NAMES_UPPER = ['ANDRYCHÓW', 'BEŁCHATÓW', 'BIAŁYSTOK', 'BIELAWA', 'BIERUŃ', 'BOGUCHWAŁA', 'BRENNA',
+                            'BYDGOSZCZ', 'BYTOM', 'BYTÓW', 'CHEŁMEK', 'CHOJNICE', 'CHORZÓW', 'CHRZANÓW', 'CHYBIE',
+                            'CZERMNO', 'CZĘSTOCHOWA', 'DANKOWICE', 'DREZDENKO', 'ELBLĄG', 'GDAŃSK', 'GDYNIA', 'GLIWICE',
+                            'GORZYCE', 'GORZÓW WIELKOPOLSKI', 'GRACZE', 'GRODZISK MAZOWIECKI', 'GRODZISK WIELKOPOLSKI',
+                            'GRUDZIĄDZ', 'GŁOGÓW', 'JANIKOWO', 'JASTRZĘBIE', 'JAWORZNO', 'KACZYCE', 'KALISZ',
+                            'KATOWICE', 'KIELCE', 'KLECZA', 'KLECZEW', 'KLUCZBORK', 'KNURÓW', 'KONIN', 'KRAKÓW',
+                            'KRZANOWICE', 'KĘDZIERZYN-KOŹLE', 'KĘTY', 'LEGNICA', 'LIBIĄŻ', 'LUBIN', 'LUBLIN', 'LĘDZINY',
+                            'MIELEC', 'MILÓWKA', 'MŁAWA', 'NIECIECZA', 'NIEDOBCZYCE', 'NIEPOŁOMICE', 'NIWKA',
+                            'NOWA WIEŚ', 'NOWE MIASTO LUBAWSKIE', 'NOWY DWÓR MAZOWIECKI', 'NOWY SĄCZ', 'NOWY TARG',
+                            'OLEŚNICA', 'OLSZTYN', 'OPOCZNO', 'OPOLE', 'OSTROWIEC ŚWIĘTOKRZYSKI', 'OTWOCK', 'OŚWIĘCIM',
+                            'PIOTRKÓW TRYBUNALSKI', 'PISARZOWICE', 'POLKOWICE', 'PORĄBKA', 'POZNAŃ', 'PRUSZKÓW',
+                            'PUŁAWY', 'PŁOCK', 'RADZIONKÓW', 'RUDA ŚLĄSKA', 'RZESZÓW', 'SANOK', 'SIEDLCE', 'SIERSZA',
+                            'SKIERNIEWICE', 'SKOCZÓW', 'SOSNOWIEC', 'STALOWA WOLA', 'STANISŁAW', 'STRUMIEŃ', 'STRÓŻE',
+                            'SUCHA BESKIDZKA', 'SUWAŁKI', 'SZCZECIN', 'TUREK', 'TYCHY', 'USTROŃ', 'WADOWICE',
+                            'WARSZAWA', 'WAŁBRZYCH', 'WIEPRZ', 'WIKIELEC', 'WODZISŁAW ŚLĄSKI', 'WROCŁAW',
+                            'WĘGIERSKA GÓRKA', 'WŁOCŁAWEK', 'ZABIERZÓW', 'ZABRZE', 'ZAMOŚĆ', 'ZAWIERCIE', 'ZEMBRZYCE',
+                            'ZIELONA GÓRA', 'ZĄBKI', 'ŁOMŻA', 'ŁOWICZ', 'ŁÓDŹ', 'ŁĘCZNA', 'ŚWIEBODZIN', 'ŚWINOUJŚCIE',
+                            'ŻAGAŃ', 'ŻARY', 'ŻYWIEC']
 
     if df_w is None or df_p is None:
         st.error("Brak plików wystepy.csv lub pilkarze.csv do uruchomienia gier.")
@@ -5135,8 +5135,10 @@ elif opcja == "🎮 Zagadki":
         with tab_krzyzowka:
             st.subheader("📝 Krzyżówka Panoramiczna")
             st.markdown(
-                "Prawdziwa krzyżówka 2D! Kliknij różowe pole z pytaniem (`1 ➔` lub `2 ▼`) na siatce, aby zjechać do panelu odpowiedzi. Jeśli wpiszesz prawidłową odpowiedź, kafelki zapalą się na złoto! Częściowe trafienia będą miały **zielone tło**. Litery z numerkami utworzą historyczne **HASŁO DNIA**.")
+                "Prawdziwa krzyżówka 2D! Kliknij różowe pole z pytaniem (`1 ➔` lub `2 ▼`) na siatce, aby zjechać do panelu odpowiedzi. Jeśli wpiszesz prawidłową odpowiedź, kafelki zapalą się na złoto! Częściowe trafienia będą miały **zielone tło**. Litery z numerkami utworzą historyczne **HASŁO DNIA**.<br>⚠️ **Ważne:** Wpisuj hasła **BEZ polskich znaków** (np. użyj L zamiast Ł, A zamiast Ą).",
+                unsafe_allow_html=True)
 
+            # Punkt zakotwiczenia, by kliknięcie przenosiło tutaj
             st.markdown("<div id='krzyzowka-panel'></div>", unsafe_allow_html=True)
 
             today_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -5272,7 +5274,10 @@ elif opcja == "🎮 Zagadki":
 
                             miasto_norm = normalize_name(found_city).upper().replace('-', '').replace(' ', '')
                             if 4 <= len(miasto_norm) <= 12 and miasto_norm not in unique_words:
-                                clue = f"Z tego miasta przyjeżdżał rywal TSP: {opp_str.title()}. Odgadnij: MIASTO."
+                                if clean_klub:
+                                    clue = f"Miasto, z którego wywodzi się klub {clean_klub.title()} (rywal TSP). Odgadnij: MIASTO."
+                                else:
+                                    clue = f"Z tego miasta pochodzi jeden z ligowych rywali TSP. Odgadnij: MIASTO."
                                 words_pool.append(
                                     {'word': miasto_norm, 'clue': clue, 'entity_id': f"CITY_{miasto_norm}"})
                                 unique_words.add(miasto_norm)
@@ -5436,6 +5441,7 @@ elif opcja == "🎮 Zagadki":
                 gave_up = st.session_state.get(f"cw_gave_up_{today_str}", False)
                 wszystko_ok = True
 
+                # INTERAKTYWNE POPOVERY DO WPISYWANIA HASEŁ
                 st.markdown("### 🔠 Panel Wpisywania Haseł")
                 cols_exp = st.columns(4)
                 for i, w in enumerate(sorted(placed_words, key=lambda x: x['id'])):
@@ -5445,8 +5451,8 @@ elif opcja == "🎮 Zagadki":
                     with cols_exp[i % 4].popover(f"{w['id']}. {kierunek}", use_container_width=True):
                         if gave_up: st.success(f"Odpowiedź: **{w['word']}**")
                         st.info(w['clue'])
-                        st.text_input("Odpowiedź (i wciśnij Enter):", key=f"cw_ans_{w['id']}_{today_str}",
-                                      placeholder="Wpisz hasło...", disabled=gave_up)
+                        st.text_input("Wpisz hasło i naciśnij Enter:", key=f"cw_ans_{w['id']}_{today_str}",
+                                      placeholder="Zatwierdź Enterem...", disabled=gave_up)
 
                 st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
 
@@ -5467,6 +5473,7 @@ elif opcja == "🎮 Zagadki":
                             if coord in clues_grid:
                                 clue = clues_grid[coord]
                                 arrow = "➔" if clue['dir'] == 'H' else "▼"
+                                # KLIKALNE RÓŻOWE POLE - PRZESKAKUJE DO KOTWICY #krzyzowka-panel
                                 grid_html += f"<a href='#krzyzowka-panel' style='text-decoration:none; color:white;'><div style='background: #ff7675; padding: 2px; position: relative; border-radius: 3px; box-shadow: inset 0 0 3px rgba(0,0,0,0.3); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; height: 45px; width: 45px; cursor:pointer;'><b style='position:absolute; top:1px; left:2px; font-size:10px;'>{clue['id']}.</b><span style='position:absolute; bottom:1px; right:2px; font-size:14px; font-weight:bold;'>{arrow}</span></div></a>"
                             elif coord in grid:
                                 cell_char = grid[coord]
@@ -5543,13 +5550,11 @@ elif opcja == "🎮 Zagadki":
                                 user_w = st.session_state.get(f"cw_ans_{w['id']}_{today_str}", "").upper().strip()
                                 if user_w == w['word']:
                                     if w['dir'] == 'H' and w['y'] == coord[1] and w['x'] <= coord[0] < w['x'] + len(
-                                            w['word']):
-                                        idx_w = coord[0] - w['x']
-                                        if len(user_w) > idx_w and user_w[idx_w] == cell_char: revealed = True
+                                        w['word']):
+                                        revealed = True
                                     elif w['dir'] == 'V' and w['x'] == coord[0] and w['y'] <= coord[1] < w['y'] + len(
-                                            w['word']):
-                                        idx_w = coord[1] - w['y']
-                                        if len(user_w) > idx_w and user_w[idx_w] == cell_char: revealed = True
+                                        w['word']):
+                                        revealed = True
 
                         display_char = cell_char if revealed else "?"
                         bg_col = "#e74c3c" if revealed else "transparent"
