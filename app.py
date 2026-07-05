@@ -4573,6 +4573,7 @@ elif opcja == "🎮 Zagadki":
     import unicodedata
     import hashlib
     import datetime
+    import re
 
 
     def normalize_name(name):
@@ -4591,6 +4592,29 @@ elif opcja == "🎮 Zagadki":
 
     df_w = load_details("wystepy.csv")
     df_p = load_data("pilkarze.csv")
+    df_m = load_data("mecze.csv")
+
+    # Wklejona na sztywno lista miast - brak błędu SyntaxError!
+    CITY_NAMES_UPPER = [
+        'ANDRYCHÓW', 'BEŁCHATÓW', 'BIAŁYSTOK', 'BIELAWA', 'BIERUŃ', 'BOGUCHWAŁA', 'BRENNA',
+        'BYDGOSZCZ', 'BYTOM', 'BYTÓW', 'CHEŁMEK', 'CHOJNICE', 'CHORZÓW', 'CHRZANÓW', 'CHYBIE',
+        'CZERMNO', 'CZĘSTOCHOWA', 'DANKOWICE', 'DREZDENKO', 'ELBLĄG', 'GDAŃSK', 'GDYNIA', 'GLIWICE',
+        'GORZYCE', 'GORZÓW WIELKOPOLSKI', 'GRACZE', 'GRODZISK MAZOWIECKI', 'GRODZISK WIELKOPOLSKI',
+        'GRUDZIĄDZ', 'GŁOGÓW', 'JANIKOWO', 'JASTRZĘBIE', 'JAWORZNO', 'KACZYCE', 'KALISZ',
+        'KATOWICE', 'KIELCE', 'KLECZA', 'KLECZEW', 'KLUCZBORK', 'KNURÓW', 'KONIN', 'KRAKÓW',
+        'KRZANOWICE', 'KĘDZIERZYN-KOŹLE', 'KĘTY', 'LEGNICA', 'LIBIĄŻ', 'LUBIN', 'LUBLIN', 'LĘDZINY',
+        'MIELEC', 'MILÓWKA', 'MŁAWA', 'NIECIECZA', 'NIEDOBCZYCE', 'NIEPOŁOMICE', 'NIWKA',
+        'NOWA WIEŚ', 'NOWE MIASTO LUBAWSKIE', 'NOWY DWÓR MAZOWIECKI', 'NOWY SĄCZ', 'NOWY TARG',
+        'OLEŚNICA', 'OLSZTYN', 'OPOCZNO', 'OPOLE', 'OSTROWIEC ŚWIĘTOKRZYSKI', 'OTWOCK', 'OŚWIĘCIM',
+        'PIOTRKÓW TRYBUNALSKI', 'PISARZOWICE', 'POLKOWICE', 'PORĄBKA', 'POZNAŃ', 'PRUSZKÓW',
+        'PUŁAWY', 'PŁOCK', 'RADZIONKÓW', 'RUDA ŚLĄSKA', 'RZESZÓW', 'SANOK', 'SIEDLCE', 'SIERSZA',
+        'SKIERNIEWICE', 'SKOCZÓW', 'SOSNOWIEC', 'STALOWA WOLA', 'STANISŁAW', 'STRUMIEŃ', 'STRÓŻE',
+        'SUCHA BESKIDZKA', 'SUWAŁKI', 'SZCZECIN', 'TUREK', 'TYCHY', 'USTROŃ', 'WADOWICE',
+        'WARSZAWA', 'WAŁBRZYCH', 'WIEPRZ', 'WIKIELEC', 'WODZISŁAW ŚLĄSKI', 'WROCŁAW',
+        'WĘGIERSKA GÓRKA', 'WŁOCŁAWEK', 'ZABIERZÓW', 'ZABRZE', 'ZAMOŚĆ', 'ZAWIERCIE', 'ZEMBRZYCE',
+        'ZIELONA GÓRA', 'ZĄBKI', 'ŁOMŻA', 'ŁOWICZ', 'ŁÓDŹ', 'ŁĘCZNA', 'ŚWIEBODZIN', 'ŚWINOUJŚCIE',
+        'ŻAGAŃ', 'ŻARY', 'ŻYWIEC'
+    ]
 
     if df_w is None or df_p is None:
         st.error("Brak plików wystepy.csv lub pilkarze.csv do uruchomienia gier.")
@@ -4846,7 +4870,7 @@ elif opcja == "🎮 Zagadki":
                 st.markdown("""
                 - Celem gry jest zbudowanie wymarzonej wyjściowej jedenastki TSP z kart o losowych wymaganiach.
                 - **Ważne:** To jest tryb DAILY. Zagadka zmienia się raz dziennie i jest wspólna dla wszystkich!
-                - **Rzadkość Karty:** Po odgadnięciu gracza otrzymujesz kolor karty zależny od tego, ilu inni spełniający warunki gracze mają meczów w TSP. Jeśli wybierzesz kogoś oczywistego (najwięcej meczów) = Zwykła karta. Jeśli niszowego (najmniej) = Epicka/Diament!
+                - **Rzadkość Karty:** Kolor karty zależy od liczby meczów wybranego piłkarza względem innych spełniających kryteria. Najmniej spotkań = epicka lub legendarna rzadkość! 
                 """)
 
             c_mode1, c_mode2 = st.columns([2, 2])
@@ -5018,7 +5042,6 @@ elif opcja == "🎮 Zagadki":
                     display_name = chal.get('guessed_name') or chal['valid_full_data'][0]['name']
                     display_flag = chal.get('guessed_flag') or chal['valid_full_data'][0]['flag']
 
-                    # LOGIKA RZADKOŚCI NA PODSTAWIE LICZBY MECZÓW
                     valid_sorted = sorted(chal['valid_full_data'], key=lambda x: x['matches'], reverse=True)
                     total_valid = len(valid_sorted)
                     rank = next((i for i, p in enumerate(valid_sorted) if p['name'] == display_name), 0)
@@ -5107,24 +5130,70 @@ elif opcja == "🎮 Zagadki":
                     with cols_att[i]: render_kontra_card(i + 9, challenges[i + 9])
 
         # ==========================================
-        # GRA 3: KRZYŻÓWKA PANORAMICZNA (2D Z ROZWIJANYMI HASŁAMI)
+        # GRA 3: KRZYŻÓWKA PANORAMICZNA (POP-UPY i HASŁA HISTORYCZNE)
         # ==========================================
         with tab_krzyzowka:
             st.subheader("📝 Krzyżówka Panoramiczna")
             st.markdown(
-                "Prawdziwa, dwuwymiarowa krzyżówka! Słowa przecinają się na siatce. Rozwiń pytania poniżej, aby wpisać odpowiedzi. Ponumerowane litery utworzą ostateczne **HASŁO GŁÓWNE**.")
+                "Prawdziwa krzyżówka 2D! Kliknij różowe pole z pytaniem (`1 ➔` lub `2 ▼`) na siatce, aby zjechać do panelu odpowiedzi. Jeśli wpiszesz prawidłową odpowiedź, kafelki zapalą się na złoto! Częściowe trafienia będą miały **zielone tło**. Litery z numerkami utworzą historyczne **HASŁO DNIA**.")
+
+            st.markdown("<div id='krzyzowka-panel'></div>", unsafe_allow_html=True)
 
             today_str = datetime.date.today().strftime("%Y-%m-%d")
+            today_month = datetime.date.today().month
+            today_day = datetime.date.today().day
             seed_val = int(hashlib.md5(today_str.encode()).hexdigest(), 16) % (2 ** 32)
 
-            hasla_glowne = [
-                "AWANS", "REKORD", "STADION", "KIBICE", "BRAMKA", "PUCHAR",
-                "SEZON", "DERBY", "GOL", "PUNKTY", "KARNY", "TRENER",
-                "WALKA", "PODBESKIDZIE", "MURAWA", "ZWYCIESTWO", "BOHATER"
-            ]
+
+            def get_historical_password_and_desc():
+                if df_p is not None:
+                    dt_birth = pd.to_datetime(df_p['data urodzenia'], errors='coerce')
+                    hist_births = df_p[(dt_birth.dt.month == today_month) & (dt_birth.dt.day == today_day)]
+                    if not hist_births.empty:
+                        player = hist_births.iloc[0]
+                        nazwisko = normalize_name(str(player['imię i nazwisko']).split()[-1]).upper()
+                        cand = "".join([c for c in nazwisko if c.isalpha()])
+                        if 4 <= len(cand) <= 12:
+                            clue_unsolved = "Tego dnia pewien zawodnik z historii klubu przyszedł na świat. Odgadnij kto!"
+                            clue_solved = f"Tego dnia ({dt_birth.loc[hist_births.index[0]].year}) urodził się {player['imię i nazwisko']}!"
+                            return cand, clue_unsolved, clue_solved
+
+                if df_m is not None and 'dt_obj' in df_m.columns:
+                    m_mth = pd.to_datetime(df_m['dt_obj'], errors='coerce').dt.month
+                    m_day = pd.to_datetime(df_m['dt_obj'], errors='coerce').dt.day
+                    hist_matches = df_m[(m_mth == today_month) & (m_day == today_day)]
+                    if not hist_matches.empty:
+                        match = hist_matches.iloc[0]
+                        opp = normalize_name(str(match.get('rywal', ''))).upper()
+                        clean_opp = re.sub(r'\b(KS|GKS|MKS|FC|LKS|BKS|RKS|TS|CWKS|ZKS|KP)\b', '', opp).strip()
+                        cand = "".join([c for c in clean_opp if c.isalpha()])
+                        if 4 <= len(cand) <= 12:
+                            clue_unsolved = "Tego dnia rozegrano historyczny mecz. Hasłem jest nazwa drużyny rywala!"
+                            clue_solved = f"Tego dnia ({match['dt_obj'].year}) zagraliśmy ważny mecz przeciwko: {match.get('rywal', '')}!"
+                            return cand, clue_unsolved, clue_solved
+
+                fallbacks = [
+                    ("MURAWA",
+                     "Pewnego razu po gwałtownej ulewie to słowo odmieniano w Bielsku przez wszystkie przypadki...",
+                     "Hasło to MURAWA! W 2012 roku ulewa zalała stadion zamieniając boisko w basen."),
+                    ("KIBICE", "Są nazywani 'dwunastym zawodnikiem' i sercem każdego stadionu.",
+                     "Hasło to KIBICE! Zawsze oddani i wierni, niezależnie od wyników."),
+                    ("TRENER", "Czasem musi krzyknąć w szatni, czasem wymyślić taktykę stulecia.",
+                     "Hasło to TRENER! To on ponosi odpowiedzialność za to co dzieje się na murawie."),
+                    ("AWANS", "Słowo na literę A, które jest absolutnym marzeniem każdego sezonu w 1 Lidze.",
+                     "Hasło to AWANS! Emocje z 2011 i 2020 roku pozostaną z nami na zawsze."),
+                    ("KAPITAN", "Nosi na ramieniu opaskę i dowodzi drużyną na boisku.",
+                     "Hasło to KAPITAN! Lider, który ciągnie drużynę w najtrudniejszych chwilach."),
+                    ("BOHATER", "Został nim każdy gracz, który kiedykolwiek przesądził o wyniku w 90. minucie.",
+                     "Hasło to BOHATER! TSP miało w swojej historii wielu takich 'Jokerów'."),
+                    ("DERBY", "Szczególny rodzaj meczu, który elektryzuje całe miasto lub region.",
+                     "Hasło to DERBY! Mecze z BKS-em czy Rekordem zawsze mają dodatkowy smaczek.")
+                ]
+                chosen = fallbacks[seed_val % len(fallbacks)]
+                return chosen[0], chosen[1], chosen[2]
 
 
-            def generate_panoramic_crossword(df_players, df_wystepy, seed, haslo_dnia):
+            def generate_panoramic_crossword(df_players, df_wystepy, df_mecze, seed, haslo_dnia):
                 df_w_stats = df_wystepy.groupby('Zawodnik_Clean').agg(
                     Real_Mecze=('Mecz_Label', 'nunique'),
                     Real_Gole=('Gole', lambda x: pd.to_numeric(x, errors='coerce').fillna(0).sum())
@@ -5132,7 +5201,6 @@ elif opcja == "🎮 Zagadki":
 
                 df_p_merged = df_players.drop_duplicates(subset=['imię i nazwisko']).dropna(
                     subset=['imię i nazwisko']).copy()
-                # Zabezpieczenie przed pozycją "-"
                 df_p_merged = df_p_merged[
                     ~df_p_merged['pozycja'].astype(str).str.strip().isin(['-', '', 'nan', 'Nieznana'])]
 
@@ -5143,6 +5211,7 @@ elif opcja == "🎮 Zagadki":
 
                 unique_words = set()
                 words_pool = []
+
                 for _, r in df_p_cross.iterrows():
                     imie_nazwisko = str(r.get('imię i nazwisko', '')).strip()
                     if not imie_nazwisko or len(imie_nazwisko.split()) < 2: continue
@@ -5163,25 +5232,56 @@ elif opcja == "🎮 Zagadki":
                     poz = str(r.get('pozycja', 'Nieznana')).lower()
 
                     col_b = next((c for c in r.index if c.lower() in ['data urodzenia', 'urodzony', 'data_ur']), None)
-                    ur = "?"
+                    ur = 2000
                     if col_b and pd.notna(r[col_b]):
                         m_yr = re.search(r'\b(19\d{2}|20\d{2})\b', str(r[col_b]))
-                        if m_yr: ur = m_yr.group(1)
+                        if m_yr: ur = int(m_yr.group(1))
 
-                    # Logiczne podpowiedzi
+                    if 'POLSKA' in narodowosc and ur < 1996 and m < 5: continue
+
+                    player_id = f"PL_{imie}_{nazwisko}_{ur}"
+
                     if 3 <= len(nazwisko) <= 12 and nazwisko not in unique_words:
-                        clue = f"IMIĘ: {imie.capitalize()}. Zagrał w TSP {m} razy, notując {g} trafień. Pozycja: {poz.capitalize()}. Rocznik: {ur}. Odgadnij: NAZWISKO."
-                        words_pool.append({'word': nazwisko, 'clue': clue})
+                        clue = f"Zagrał w TSP {m} razy (gole: {g}). Pozycja: {poz.capitalize()}. Rocznik: {ur}. Odgadnij NAZWISKO zawodnika, którego imię to {imie.capitalize()}."
+                        words_pool.append({'word': nazwisko, 'clue': clue, 'entity_id': player_id})
                         unique_words.add(nazwisko)
                     if 3 <= len(imie) <= 9 and imie not in unique_words:
-                        clue = f"NAZWISKO: {nazwisko.capitalize()}. Kraj pochodzenia to {narodowosc.capitalize()}. Występy: {m}. Odgadnij: IMIĘ."
-                        words_pool.append({'word': imie, 'clue': clue})
+                        clue = f"Kraj pochodzenia to {narodowosc.capitalize()}. Występy: {m}. Odgadnij IMIĘ zawodnika, którego nazwisko to {nazwisko.capitalize()}."
+                        words_pool.append({'word': imie, 'clue': clue, 'entity_id': player_id})
                         unique_words.add(imie)
                     if narodowosc not in ['-', 'NAN', ''] and 4 <= len(
                             narodowosc) <= 11 and narodowosc not in unique_words:
-                        clue = f"Z tego kraju wywodzi się zawodnik: {imie.capitalize()} {nazwisko.capitalize()}. Odgadnij: KRAJ."
-                        words_pool.append({'word': narodowosc, 'clue': clue})
+                        clue = f"Z tego kraju wywodzi się zawodnik: {imie.capitalize()} {nazwisko.capitalize()}. Odgadnij KRAJ."
+                        words_pool.append({'word': narodowosc, 'clue': clue, 'entity_id': player_id})
                         unique_words.add(narodowosc)
+
+                if df_mecze is not None and 'rywal' in df_mecze.columns:
+                    unique_opps = df_mecze['rywal'].dropna().unique()
+                    for opp in unique_opps:
+                        opp_str = str(opp).upper()
+                        found_city = None
+                        for city in CITY_NAMES_UPPER:
+                            if city in opp_str:
+                                found_city = city
+                                break
+
+                        if found_city:
+                            klub_part = opp_str.replace(found_city, "").strip()
+                            clean_klub = re.sub(r'\b(KS|GKS|MKS|FC|LKS|BKS|RKS|TS|CWKS|ZKS|KP)\b', '',
+                                                klub_part).strip()
+
+                            miasto_norm = normalize_name(found_city).upper().replace('-', '').replace(' ', '')
+                            if 4 <= len(miasto_norm) <= 12 and miasto_norm not in unique_words:
+                                clue = f"Z tego miasta przyjeżdżał rywal TSP: {opp_str.title()}. Odgadnij: MIASTO."
+                                words_pool.append(
+                                    {'word': miasto_norm, 'clue': clue, 'entity_id': f"CITY_{miasto_norm}"})
+                                unique_words.add(miasto_norm)
+
+                            klub_norm = normalize_name(clean_klub).upper().replace('-', '').replace(' ', '')
+                            if 3 <= len(klub_norm) <= 12 and klub_norm not in unique_words and len(klub_norm) > 0:
+                                clue = f"Klub z miasta {found_city.title()}, z którym grało TSP. Odgadnij: NAZWA KLUBU (np. UNIA, RUCH)."
+                                words_pool.append({'word': klub_norm, 'clue': clue, 'entity_id': f"CLUB_{klub_norm}"})
+                                unique_words.add(klub_norm)
 
                 for attempt in range(100):
                     current_seed = (seed + attempt) % (2 ** 32)
@@ -5192,17 +5292,21 @@ elif opcja == "🎮 Zagadki":
                     grid = {}
                     clues_grid = {}
                     placed_words = []
+                    used_entities = set()
 
                     w0 = pool.pop(0)
                     for i, char in enumerate(w0['word']): grid[(i, 0)] = char
                     placed_words.append({'id': 1, 'word': w0['word'], 'x': 0, 'y': 0, 'dir': 'H', 'clue': w0['clue']})
                     clues_grid[(-1, 0)] = {'id': 1, 'dir': 'H', 'clue': w0['clue']}
+                    used_entities.add(w0.get('entity_id', ''))
 
                     word_id = 2
-                    target_words = random.randint(15, 20)
+                    target_words = random.randint(14, 18)
 
                     for w in pool:
                         if len(placed_words) >= target_words: break
+                        if w.get('entity_id') in used_entities: continue
+
                         word = w['word']
                         placed = False
 
@@ -5231,7 +5335,7 @@ elif opcja == "🎮 Zagadki":
                                         if (clue_x, clue_y) in grid or (clue_x, clue_y) in clues_grid: continue
 
                                         valid = True
-                                        if start_x < -18 or start_x > 18 or start_y < -18 or start_y > 18: valid = False
+                                        if start_x < -20 or start_x > 20 or start_y < -20 or start_y > 20: valid = False
 
                                         if valid:
                                             if (start_x - dx, start_y - dy) in grid: valid = False
@@ -5261,11 +5365,11 @@ elif opcja == "🎮 Zagadki":
                                                  'dir': cand_dir, 'clue': w['clue']})
                                             clues_grid[(clue_x, clue_y)] = {'id': word_id, 'dir': cand_dir,
                                                                             'clue': w['clue']}
+                                            used_entities.add(w.get('entity_id', ''))
                                             word_id += 1
                                             placed = True
 
-                    if len(placed_words) < 12:
-                        continue
+                    if len(placed_words) < 12: continue
 
                     available_coords = list(grid.keys())
                     random.shuffle(available_coords)
@@ -5289,28 +5393,63 @@ elif opcja == "🎮 Zagadki":
                 return None, None, None, None
 
 
-            random.seed(seed_val)
-            haslo_dnia = hasla_glowne[seed_val % len(hasla_glowne)]
+            haslo_dnia, event_desc_unsolved, event_desc_solved = get_historical_password_and_desc()
 
             if f"cw_grid_{today_str}" not in st.session_state:
                 with st.spinner("Układanie dzisiejszej krzyżówki panoramicznej... to może chwilę potrwać!"):
-                    grid, clues_grid, placed_words, pass_mapping = generate_panoramic_crossword(df_p, df_w, seed_val,
-                                                                                                haslo_dnia)
+                    grid, clues_grid, placed_words, pass_mapping = generate_panoramic_crossword(df_p, df_w, df_m,
+                                                                                                seed_val, haslo_dnia)
+                    if grid is None:
+                        haslo_dnia = "AWANS"
+                        grid, clues_grid, placed_words, pass_mapping = generate_panoramic_crossword(df_p, df_w, df_m,
+                                                                                                    seed_val,
+                                                                                                    haslo_dnia)
+
                     st.session_state[f"cw_grid_{today_str}"] = grid
                     st.session_state[f"cw_clues_{today_str}"] = clues_grid
                     st.session_state[f"cw_words_{today_str}"] = placed_words
                     st.session_state[f"cw_pass_{today_str}"] = pass_mapping
                     st.session_state[f"cw_haslo_{today_str}"] = haslo_dnia
+                    st.session_state[f"cw_desc_unsolved_{today_str}"] = event_desc_unsolved
+                    st.session_state[f"cw_desc_solved_{today_str}"] = event_desc_solved
+                    st.session_state[f"cw_gave_up_{today_str}"] = False
             else:
                 grid = st.session_state[f"cw_grid_{today_str}"]
                 clues_grid = st.session_state[f"cw_clues_{today_str}"]
                 placed_words = st.session_state[f"cw_words_{today_str}"]
                 pass_mapping = st.session_state[f"cw_pass_{today_str}"]
                 haslo_dnia = st.session_state[f"cw_haslo_{today_str}"]
+                event_desc_unsolved = st.session_state[f"cw_desc_unsolved_{today_str}"]
+                event_desc_solved = st.session_state[f"cw_desc_solved_{today_str}"]
 
             if grid is None:
-                st.error("Wybacz, algorytm nie zdołał ułożyć krzyżówki dla dzisiejszego hasła. Wróć jutro!")
+                st.error(
+                    "Wybacz, algorytm nie zdołał ułożyć krzyżówki dla dzisiejszego hasła ze zdefiniowanej bazy. Wróć jutro!")
             else:
+                c_give1, c_give2 = st.columns([4, 1])
+                c_give1.info(f"💡 **Tajemnica Hasła Dnia:** {event_desc_unsolved}")
+                with c_give2:
+                    if st.button("🏳️ Pokaż odpowiedzi", key="cw_give_up", use_container_width=True):
+                        st.session_state[f"cw_gave_up_{today_str}"] = True
+                        st.rerun()
+
+                gave_up = st.session_state.get(f"cw_gave_up_{today_str}", False)
+                wszystko_ok = True
+
+                st.markdown("### 🔠 Panel Wpisywania Haseł")
+                cols_exp = st.columns(4)
+                for i, w in enumerate(sorted(placed_words, key=lambda x: x['id'])):
+                    kierunek = "➔ Poziomo" if w['dir'] == 'H' else "▼ Pionowo"
+                    user_w = st.session_state.get(f"cw_ans_{w['id']}_{today_str}", "").upper().strip()
+
+                    with cols_exp[i % 4].popover(f"{w['id']}. {kierunek}", use_container_width=True):
+                        if gave_up: st.success(f"Odpowiedź: **{w['word']}**")
+                        st.info(w['clue'])
+                        st.text_input("Odpowiedź (i wciśnij Enter):", key=f"cw_ans_{w['id']}_{today_str}",
+                                      placeholder="Wpisz hasło...", disabled=gave_up)
+
+                st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
+
                 all_x = [x for x, y in list(grid.keys()) + list(clues_grid.keys())]
                 all_y = [y for x, y in list(grid.keys()) + list(clues_grid.keys())]
                 min_x, max_x = min(all_x), max(all_x)
@@ -5318,7 +5457,6 @@ elif opcja == "🎮 Zagadki":
                 cols = max_x - min_x + 1
 
                 col_cross, col_main = st.columns([3, 1])
-                wszystko_ok = True
 
                 with col_cross:
                     grid_html = f"<div style='display: grid; grid-template-columns: repeat({cols}, 45px); grid-gap: 2px; background: #222; padding: 10px; border-radius: 8px; overflow-x: auto; margin-bottom: 20px;'>"
@@ -5329,32 +5467,59 @@ elif opcja == "🎮 Zagadki":
                             if coord in clues_grid:
                                 clue = clues_grid[coord]
                                 arrow = "➔" if clue['dir'] == 'H' else "▼"
-                                grid_html += f"<div style='background: #ff7675; color: white; padding: 2px; position: relative; border-radius: 3px; box-shadow: inset 0 0 3px rgba(0,0,0,0.3); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; height: 45px; width: 45px;'><b style='position:absolute; top:1px; left:2px; font-size:10px;'>{clue['id']}.</b><span style='position:absolute; bottom:1px; right:2px; font-size:14px; font-weight:bold;'>{arrow}</span></div>"
+                                grid_html += f"<a href='#krzyzowka-panel' style='text-decoration:none; color:white;'><div style='background: #ff7675; padding: 2px; position: relative; border-radius: 3px; box-shadow: inset 0 0 3px rgba(0,0,0,0.3); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; height: 45px; width: 45px; cursor:pointer;'><b style='position:absolute; top:1px; left:2px; font-size:10px;'>{clue['id']}.</b><span style='position:absolute; bottom:1px; right:2px; font-size:14px; font-weight:bold;'>{arrow}</span></div></a>"
                             elif coord in grid:
                                 cell_char = grid[coord]
                                 display_char = ""
                                 bg_color = "#fff"
-                                text_color = "#000"
+                                text_color = "transparent"
 
-                                for w in placed_words:
-                                    user_w = st.session_state.get(f"cw_ans_{w['id']}_{today_str}", "").upper().strip()
-                                    if w['dir'] == 'H' and w['y'] == y and w['x'] <= x < w['x'] + len(w['word']):
-                                        idx = x - w['x']
-                                        if len(user_w) > idx: display_char = user_w[idx]
-                                        if user_w == w['word']:
-                                            display_char = cell_char
-                                            bg_color = "#f1c40f"
-                                    elif w['dir'] == 'V' and w['x'] == x and w['y'] <= y < w['y'] + len(w['word']):
-                                        idx = y - w['y']
-                                        if len(user_w) > idx: display_char = user_w[idx]
-                                        if user_w == w['word']:
-                                            display_char = cell_char
-                                            bg_color = "#f1c40f"
+                                is_correct_char = False
+                                is_wrong_char = False
 
-                                if display_char != cell_char: wszystko_ok = False
+                                if gave_up:
+                                    display_char = cell_char
+                                    bg_color = "#d4af37"
+                                    text_color = "#000"
+                                else:
+                                    for w in placed_words:
+                                        user_w = st.session_state.get(f"cw_ans_{w['id']}_{today_str}",
+                                                                      "").upper().strip()
+                                        if w['dir'] == 'H' and w['y'] == y and w['x'] <= x < w['x'] + len(w['word']):
+                                            idx = x - w['x']
+                                            if len(user_w) > idx:
+                                                cand = user_w[idx]
+                                                if cand == cell_char:
+                                                    display_char = cand
+                                                    is_correct_char = True
+                                                    is_wrong_char = False
+                                                elif not is_correct_char:
+                                                    display_char = cand
+                                                    is_wrong_char = True
+                                        elif w['dir'] == 'V' and w['x'] == x and w['y'] <= y < w['y'] + len(w['word']):
+                                            idx = y - w['y']
+                                            if len(user_w) > idx:
+                                                cand = user_w[idx]
+                                                if cand == cell_char:
+                                                    display_char = cand
+                                                    is_correct_char = True
+                                                    is_wrong_char = False
+                                                elif not is_correct_char:
+                                                    display_char = cand
+                                                    is_wrong_char = True
+
+                                    if is_correct_char:
+                                        bg_color = "#28a745"
+                                        text_color = "#fff"
+                                    elif is_wrong_char:
+                                        bg_color = "#dc3545"
+                                        text_color = "#fff"
+                                        wszystko_ok = False
+                                    else:
+                                        wszystko_ok = False
 
                                 is_pass = coord in pass_mapping
-                                pass_badge = f"<div style='position:absolute; bottom:1px; right:2px; font-size:9px; color:#e74c3c; font-weight:bold;'>{pass_mapping[coord]}</div>" if is_pass else ""
+                                pass_badge = f"<div style='position:absolute; bottom:1px; right:2px; font-size:9px; color:#333; font-weight:bold;'>{pass_mapping[coord]}</div>" if is_pass else ""
 
                                 grid_html += f"<div style='background: {bg_color}; color: {text_color}; position: relative; border-radius: 3px; display: flex; justify-content: center; align-items: center; font-size: 18px; font-weight: bold; border: 1px solid #ccc; height: 45px; width: 45px;'>{display_char}{pass_badge}</div>"
                             else:
@@ -5365,23 +5530,26 @@ elif opcja == "🎮 Zagadki":
 
                 with col_main:
                     st.markdown("<h3 style='text-align:center;'>HASŁO GŁÓWNE</h3>", unsafe_allow_html=True)
-                    st.caption("Pojawi się, gdy odgadniesz wszystkie pola numeryczne.")
+                    st.caption("Ujawni się po odgadnięciu pól numerycznych.")
                     pass_html = "<div style='display:flex; flex-direction:column; align-items:center; gap:5px; margin-top:10px;'>"
 
                     sorted_pass = sorted([(idx, coord) for coord, idx in pass_mapping.items()])
 
                     for idx, coord in sorted_pass:
                         cell_char = grid[coord]
-                        revealed = False
-                        for w in placed_words:
-                            user_w = st.session_state.get(f"cw_ans_{w['id']}_{today_str}", "").upper().strip()
-                            if user_w == w['word']:
-                                if w['dir'] == 'H' and w['y'] == coord[1] and w['x'] <= coord[0] < w['x'] + len(
-                                    w['word']):
-                                    revealed = True
-                                elif w['dir'] == 'V' and w['x'] == coord[0] and w['y'] <= coord[1] < w['y'] + len(
-                                    w['word']):
-                                    revealed = True
+                        revealed = gave_up
+                        if not revealed:
+                            for w in placed_words:
+                                user_w = st.session_state.get(f"cw_ans_{w['id']}_{today_str}", "").upper().strip()
+                                if user_w == w['word']:
+                                    if w['dir'] == 'H' and w['y'] == coord[1] and w['x'] <= coord[0] < w['x'] + len(
+                                            w['word']):
+                                        idx_w = coord[0] - w['x']
+                                        if len(user_w) > idx_w and user_w[idx_w] == cell_char: revealed = True
+                                    elif w['dir'] == 'V' and w['x'] == coord[0] and w['y'] <= coord[1] < w['y'] + len(
+                                            w['word']):
+                                        idx_w = coord[1] - w['y']
+                                        if len(user_w) > idx_w and user_w[idx_w] == cell_char: revealed = True
 
                         display_char = cell_char if revealed else "?"
                         bg_col = "#e74c3c" if revealed else "transparent"
@@ -5395,18 +5563,13 @@ elif opcja == "🎮 Zagadki":
 
                 st.markdown("---")
 
-                if wszystko_ok:
+                if wszystko_ok and not gave_up:
                     st.balloons()
-                    st.success(f"🎉 BRAWO! Rozwiązałeś dzisiejszą krzyżówkę. Hasło to: **{haslo_dnia}**")
-                else:
-                    st.markdown("### Wpisz odpowiedzi rozwijając pytania poniżej:")
-                    cols_exp = st.columns(2)
-                    for i, w in enumerate(sorted(placed_words, key=lambda x: x['id'])):
-                        kierunek = "Poziomo" if w['dir'] == 'H' else "Pionowo"
-                        with cols_exp[i % 2].expander(f"Pytanie {w['id']}. ({kierunek} - {len(w['word'])} liter) 🔻"):
-                            st.info(w['clue'])
-                            st.text_input(f"Wpisz hasło do pytania {w['id']}:", key=f"cw_ans_{w['id']}_{today_str}",
-                                          placeholder="Odpowiedź...")
+                    st.success(f"🎉 BRAWO! Rozwiązałeś dzisiejszą krzyżówkę w 100%. Hasło to: **{haslo_dnia}**")
+                    st.info(f"📜 **Rozwiązanie Tajemnicy:** {event_desc_solved}")
+                elif gave_up:
+                    st.error(f"Poddano się. Dzisiejsze Hasło to: **{haslo_dnia}**")
+                    st.info(f"📜 **Rozwiązanie Tajemnicy:** {event_desc_solved}")
 
         # ==========================================
         # GRA 4: KOŁO FORTUNY (Zgadnij Zawodnika)
