@@ -1418,7 +1418,10 @@ def parse_result(val):
 
 def render_match_report_logic(match_label, squad_df):
     import urllib.parse
+    import urllib.request
     import re
+    import datetime
+
     target_date = None
     rival_raw = ""
     competition_info = ""
@@ -1430,7 +1433,7 @@ def render_match_report_logic(match_label, squad_df):
             try:
                 dt_val = squad_df.iloc[0]['Data_Sort']
                 if pd.notna(dt_val):
-                    target_date = pd.to_datetime(dt_val).date()
+                    target_date = pd.to_datetime(dt_val, dayfirst=True).date()
             except:
                 pass
 
@@ -1474,10 +1477,14 @@ def render_match_report_logic(match_label, squad_df):
             if pl in s: s = s.replace(pl, digit); break
         s = re.sub(r'\s+', '.', s).strip()
         for fmt in ['%d.%m.%Y', '%Y-%m-%d', '%d-%m-%Y', '%Y.%m.%d', '%d %m %Y']:
-            try: return pd.to_datetime(s, format=fmt).date()
-            except: continue
-        try: return pd.to_datetime(s).date()
-        except: return None
+            try:
+                return pd.to_datetime(s, format=fmt).date()
+            except:
+                continue
+        try:
+            return pd.to_datetime(s, dayfirst=True).date()
+        except:
+            return None
 
     raw_scorers = "-"
     df_matches = load_data("mecze.csv")
@@ -1491,10 +1498,13 @@ def render_match_report_logic(match_label, squad_df):
             match_row = df_matches[(df_matches['clean_date'] >= s_win) & (df_matches['clean_date'] <= e_win)]
 
             if len(match_row) > 1 and rival_raw:
-                def norm(txt): return str(txt).lower().replace('ks ', '').replace('mks ', '').replace('gks ', '').strip()
+                def norm(txt):
+                    return str(txt).lower().replace('ks ', '').replace('mks ', '').replace('gks ', '').strip()
+
                 r_target = norm(rival_raw)
                 if 'rywal' in match_row.columns:
-                    match_row = match_row[match_row['rywal'].apply(lambda x: r_target in norm(x) or norm(x) in r_target)]
+                    match_row = match_row[
+                        match_row['rywal'].apply(lambda x: r_target in norm(x) or norm(x) in r_target)]
 
             if not match_row.empty:
                 match_result = str(match_row.iloc[0].get('wynik', '')).strip()
@@ -1505,7 +1515,9 @@ def render_match_report_logic(match_label, squad_df):
                 if raw_scorers_val not in ['-', 'nan', '', 'NaN']:
                     raw_scorers = str(raw_scorers_val)
 
-                comp_col = next((c for c in match_row.columns if c.lower().strip() in ['rozgrywki', 'liga', 'kolejka', 'typ']), None)
+                comp_col = next(
+                    (c for c in match_row.columns if c.lower().strip() in ['rozgrywki', 'liga', 'kolejka', 'typ']),
+                    None)
                 if comp_col:
                     comp_val = str(match_row.iloc[0][comp_col]).strip()
                     if comp_val and comp_val.lower() not in ['nan', '-', '']:
@@ -1539,7 +1551,7 @@ def render_match_report_logic(match_label, squad_df):
         date_s = parts[0].strip()
     except:
         info_s = match_label
-        date_s = str(target_date) if target_date else "-"
+        date_s = str(target_date.strftime('%d.%m.%Y')) if target_date else "-"
 
     avg_age_str = ""
     df_p_bio = load_data("pilkarze.csv")
@@ -1547,7 +1559,9 @@ def render_match_report_logic(match_label, squad_df):
         df_p_bio['join_key'] = df_p_bio['imię i nazwisko'].astype(str).str.lower().str.strip()
         col_b = next((c for c in df_p_bio.columns if c in ['data urodzenia', 'urodzony', 'data_ur']), None)
         if col_b:
-            starters = squad_df[(squad_df['Status'].isin(['Cały mecz', 'Zszedł', 'Grał', 'Czerwona kartka', 'Czerwona'])) & (squad_df['Status'] != 'Wszedł')].copy()
+            starters = squad_df[
+                (squad_df['Status'].isin(['Cały mecz', 'Zszedł', 'Grał', 'Czerwona kartka', 'Czerwona'])) & (
+                            squad_df['Status'] != 'Wszedł')].copy()
             starters['join_key'] = starters['Zawodnik_Clean'].astype(str).str.lower().str.strip()
             merged_starters = pd.merge(starters, df_p_bio[['join_key', col_b]], on='join_key', how='left')
 
@@ -1555,9 +1569,10 @@ def render_match_report_logic(match_label, squad_df):
                 if pd.isna(row[col_b]): return None
                 try:
                     bdate = pd.to_datetime(row[col_b], dayfirst=True)
-                    mdate = pd.to_datetime(target_date)
+                    mdate = pd.to_datetime(target_date, dayfirst=True)
                     return (mdate - bdate).days / 365.25
-                except: return None
+                except:
+                    return None
 
             merged_starters['age_at_match'] = merged_starters.apply(calc_age_at_match, axis=1)
             valid_ages = merged_starters['age_at_match'].dropna()
@@ -1569,6 +1584,7 @@ def render_match_report_logic(match_label, squad_df):
     link_90minut = ""
     if target_date and target_date.year >= 2002 and rival_raw:
         score_for_query = ""
+        # Próba wyciągnięcia dokładnego wyniku, co ułatwi szukanie
         if match_result and match_result not in ['-', 'nan']:
             m_score = re.search(r'(\d+)[:\-](\d+)', match_result)
             if m_score:
@@ -1578,11 +1594,13 @@ def render_match_report_logic(match_label, squad_df):
                 score_for_query = match_result
 
         query_str = f"Podbeskidzie {rival_raw}" if is_home_match else f"{rival_raw} Podbeskidzie"
-        if score_for_query: query_str += f" {score_for_query}"
+        if score_for_query:
+            query_str += f" {score_for_query}"
 
-        safe_query = urllib.parse.quote_plus(f"!ducky site:90minut.pl {query_str}")
+        # Użycie wyniku + wyrzucenie kariera z wyników dla bezpieczeństwa
+        safe_query = urllib.parse.quote_plus(f"!ducky site:90minut.pl {query_str} -kariera")
         url_90minut = f"https://duckduckgo.com/?q={safe_query}"
-        link_90minut = f" | <a href='{url_90minut}' target='_blank' style='color: #3498db; text-decoration: none;'>🔗 90minut.pl</a>"
+        link_90minut = f" | <a href='{url_90minut}' target='_blank' style='color: #3498db; text-decoration: none; font-weight: bold;'>🔗 90minut.pl</a>"
 
     st.markdown(f"""
     <div style="text-align: center; padding: 15px; background-color: rgba(40, 167, 69, 0.1); border: 1px solid #28a745; border-radius: 8px; margin-bottom: 10px;">
@@ -1602,8 +1620,14 @@ def render_match_report_logic(match_label, squad_df):
                     if item['is_own']:
                         st.error(item['display'])
                     else:
-                        if st.button(item['display'], key=f"rep_sc_{match_label}_{idx}_{item['link_name']}", use_container_width=True):
-                            st.session_state['cm_selected_player'] = item['link_name']
+                        if st.button(item['display'], key=f"rep_sc_{match_label}_{idx}_{item['link_name']}",
+                                     use_container_width=True):
+                            # --- LOGIKA DLA KALENDARZA ---
+                            if st.session_state.get('opcja') == 'Kalendarz':
+                                st.session_state['cal_selected_item'] = item['link_name']
+                                st.session_state['cal_view_mode'] = 'profile'
+                            else:
+                                st.session_state['cm_selected_player'] = item['link_name']
                             st.rerun()
         else:
             st.write(raw_scorers)
@@ -1613,9 +1637,14 @@ def render_match_report_logic(match_label, squad_df):
         _, c_btn, _ = st.columns([1, 2, 1])
         with c_btn:
             if st.button(f"👔 Trener: {coach_name}", key=f"coach_btn_{match_label}_fix", use_container_width=True):
-                st.session_state['selected_coach'] = coach_name
-                st.session_state['coach_view_mode'] = 'profile'
-                st.session_state['opcja'] = 'Trenerzy'
+                # --- LOGIKA DLA KALENDARZA ---
+                if st.session_state.get('opcja') == 'Kalendarz':
+                    st.session_state['cal_selected_item'] = coach_name
+                    st.session_state['cal_view_mode'] = 'coach_profile'
+                else:
+                    st.session_state['selected_coach'] = coach_name
+                    st.session_state['coach_view_mode'] = 'profile'
+                    st.session_state['opcja'] = 'Trenerzy'
                 st.rerun()
 
     if squad_df.empty:
@@ -1659,7 +1688,9 @@ def render_match_report_logic(match_label, squad_df):
         if m > 0:
             p_in = row_in['Zawodnik_Clean']
             p_out = map_in_to_out.get(p_in, 'Nieznany')
-            timeline_events.append({'min': m, 'icon': '🔄', 'text': f"<span style='color:#28a745;'>⬆️ {p_in}</span> | <span style='color:#dc3545;'>⬇️ {p_out}</span>", 'type': 'sub'})
+            timeline_events.append({'min': m, 'icon': '🔄',
+                                    'text': f"<span style='color:#28a745;'>⬆️ {p_in}</span> | <span style='color:#dc3545;'>⬇️ {p_out}</span>",
+                                    'type': 'sub'})
 
     for _, r in squad_df.iterrows():
         status = r.get('Status', '')
@@ -1697,12 +1728,19 @@ def render_match_report_logic(match_label, squad_df):
         status = row.get('Status', '')
 
         with c1:
-            if is_sub: st.caption(f"{entry}'" if entry > 0 else "-")
-            else: st.write(f"{mins}'" if mins > 0 else "-")
+            if is_sub:
+                st.caption(f"{entry}'" if entry > 0 else "-")
+            else:
+                st.write(f"{mins}'" if mins > 0 else "-")
 
         with c2:
             if st.button(name, key=f"p_{match_label}_{name}_{is_sub}"):
-                st.session_state['cm_selected_player'] = name
+                # --- LOGIKA DLA KALENDARZA ---
+                if st.session_state.get('opcja') == 'Kalendarz':
+                    st.session_state['cal_selected_item'] = name
+                    st.session_state['cal_view_mode'] = 'profile'
+                else:
+                    st.session_state['cm_selected_player'] = name
                 st.rerun()
 
         evs = []
@@ -1734,7 +1772,8 @@ def render_match_report_logic(match_label, squad_df):
 
     starters = squad_df[(squad_df['Status'].isin(['Cały mecz', 'Zszedł', 'Grał', 'Czerwona kartka', 'Czerwona'])) & (
             squad_df['Status'] != 'Wszedł')].sort_values('File_Order')
-    subs = squad_df[squad_df['Status'] == 'Wszedł'].sort_values('Minuta_Zmiany_Real' if 'Minuta_Zmiany_Real' in squad_df.columns else 'Wejście')
+    subs = squad_df[squad_df['Status'] == 'Wszedł'].sort_values(
+        'Minuta_Zmiany_Real' if 'Minuta_Zmiany_Real' in squad_df.columns else 'Wejście')
     unused = squad_df[squad_df['Status'] == 'Rezerwowy']
 
     col_l, col_r = st.columns(2)
@@ -1969,7 +2008,7 @@ st.sidebar.header("Nawigacja")
 
 menu_options = [
     "Kalendarz",
-    "Aktualny Sezon (25/26)",
+    "Aktualny Sezon (26/27)",
     "Składy Historyczne",
     "Centrum Zawodników",
     "Centrum Meczowe",
@@ -2189,7 +2228,7 @@ if opcja == "Kalendarz":
         # Ładowanie danych
         df_m = load_data("mecze.csv")
         df_p = load_data("pilkarze.csv")
-        df_curr = load_data("25_26.csv")
+        df_curr = load_data("26_27.csv")
         df_t = load_data("trenerzy.csv")
 
 
@@ -2450,14 +2489,14 @@ if opcja == "Kalendarz":
 
     st.caption("Legenda: 🔥 Dzień Meczowy | 🔜 Nadchodzące | 🟢 Kadra | ⚫ Archiwum (inne lata)")
 
-elif opcja == "Aktualny Sezon (25/26)":
-    st.header("📊 Kadra i Statystyki 2025/2026")
+elif opcja == "Aktualny Sezon (26/27)":
+    st.header("📊 Kadra i Statystyki 2026/2027")
     if st.session_state.get('cm_selected_player'):
         if st.button("⬅️ Wróć do kadry"): st.session_state['cm_selected_player'] = None; st.rerun()
         st.divider()
         render_player_profile(st.session_state['cm_selected_player'])
     else:
-        df = load_data("25_26.csv")
+        df = load_data("26_27.csv")
         if df is not None:
             if 'status' in df.columns:
                 df['is_youth'] = df['status'].astype(str).str.contains(r'\(M\)', case=False, regex=True)
@@ -2559,7 +2598,6 @@ elif opcja == "Aktualny Sezon (25/26)":
                     "gole samobójcze": st.column_config.NumberColumn("Samobóje", format="%d 🔴")
                 }
 
-
                 def show_interactive_table(data_frame_raw, view_category, key_suffix=""):
                     data_frame = data_frame_raw.copy()
                     base_cols = ['numer', 'imię i nazwisko', 'Flaga', 'pozycja', 'mecze', 'minuty']
@@ -2595,7 +2633,6 @@ elif opcja == "Aktualny Sezon (25/26)":
                             data_frame.iloc[event.selection.rows[0]]['imię i nazwisko']).replace("Ⓜ️ ", "").strip()
                         st.rerun()
 
-
                 st.markdown("ℹ️ *Kliknij w zawodnika, aby otworzyć jego pełny profil.*")
                 pos_view = st.checkbox("Podziel tabelę na formacje (Bramkarze, Obrońcy, itd.)")
 
@@ -2603,7 +2640,6 @@ elif opcja == "Aktualny Sezon (25/26)":
                     show_interactive_table(df_view, view_mode, "main")
                 else:
                     if 'pozycja' in df_view.columns:
-                        # Inteligentne grupowanie pozycji
                         df_view['Grupa_Pozycji'] = "Inne"
                         df_view.loc[df_view['pozycja'].astype(str).str.contains('bram|gk', case=False,
                                                                                 na=False), 'Grupa_Pozycji'] = 'Bramkarz'
@@ -2677,7 +2713,7 @@ elif opcja == "Aktualny Sezon (25/26)":
                 else:
                     st.info("Brak zainstalowanej biblioteki Plotly do wyświetlania wykresów szczegółowych.")
         else:
-            st.error("Brak pliku 25_26.csv. Upewnij się, że plik znajduje się w katalogu głównym.")
+            st.error("Brak pliku 26_27.csv. Upewnij się, że plik znajduje się w katalogu głównym.")
 
 elif opcja == "Składy Historyczne":
     st.header("🗂️ Składy Historyczne")
@@ -5138,7 +5174,6 @@ elif opcja == "🎮 Zagadki":
                 "Prawdziwa krzyżówka 2D! Kliknij różowe pole z pytaniem (`1 ➔` lub `2 ▼`) na siatce, aby zjechać do panelu odpowiedzi. Jeśli wpiszesz prawidłową odpowiedź, kafelki zapalą się na złoto! Częściowe trafienia będą miały **zielone tło**. Litery z numerkami utworzą historyczne **HASŁO DNIA**.<br>⚠️ **Ważne:** Wpisuj hasła **BEZ polskich znaków** (np. użyj L zamiast Ł, A zamiast Ą).",
                 unsafe_allow_html=True)
 
-            # Punkt zakotwiczenia, by kliknięcie przenosiło tutaj
             st.markdown("<div id='krzyzowka-panel'></div>", unsafe_allow_html=True)
 
             today_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -5211,8 +5246,16 @@ elif opcja == "🎮 Zagadki":
 
                 df_p_cross = pd.merge(df_p_merged, df_w_stats, on='join_key', how='left')
 
+                # NOWE ZABEZPIECZENIE: Całkowicie blokuje powtórki tych samych słów ORAZ pytań.
                 unique_words = set()
+                unique_clues = set()
                 words_pool = []
+
+                def safe_add_to_pool(w, c, e_id):
+                    if w not in unique_words and c not in unique_clues:
+                        words_pool.append({'word': w, 'clue': c, 'entity_id': e_id})
+                        unique_words.add(w)
+                        unique_clues.add(c)
 
                 for _, r in df_p_cross.iterrows():
                     imie_nazwisko = str(r.get('imię i nazwisko', '')).strip()
@@ -5243,19 +5286,17 @@ elif opcja == "🎮 Zagadki":
 
                     player_id = f"PL_{imie}_{nazwisko}_{ur}"
 
-                    if 3 <= len(nazwisko) <= 12 and nazwisko not in unique_words:
+                    if 3 <= len(nazwisko) <= 12:
                         clue = f"Zagrał w TSP {m} razy (gole: {g}). Pozycja: {poz.capitalize()}. Rocznik: {ur}. Odgadnij NAZWISKO zawodnika, którego imię to {imie.capitalize()}."
-                        words_pool.append({'word': nazwisko, 'clue': clue, 'entity_id': player_id})
-                        unique_words.add(nazwisko)
-                    if 3 <= len(imie) <= 9 and imie not in unique_words:
+                        safe_add_to_pool(nazwisko, clue, player_id)
+
+                    if 3 <= len(imie) <= 9:
                         clue = f"Kraj pochodzenia to {narodowosc.capitalize()}. Występy: {m}. Odgadnij IMIĘ zawodnika, którego nazwisko to {nazwisko.capitalize()}."
-                        words_pool.append({'word': imie, 'clue': clue, 'entity_id': player_id})
-                        unique_words.add(imie)
-                    if narodowosc not in ['-', 'NAN', ''] and 4 <= len(
-                            narodowosc) <= 11 and narodowosc not in unique_words:
+                        safe_add_to_pool(imie, clue, player_id)
+
+                    if narodowosc not in ['-', 'NAN', ''] and 4 <= len(narodowosc) <= 11:
                         clue = f"Z tego kraju wywodzi się zawodnik: {imie.capitalize()} {nazwisko.capitalize()}. Odgadnij KRAJ."
-                        words_pool.append({'word': narodowosc, 'clue': clue, 'entity_id': player_id})
-                        unique_words.add(narodowosc)
+                        safe_add_to_pool(narodowosc, clue, player_id)
 
                 if df_mecze is not None and 'rywal' in df_mecze.columns:
                     unique_opps = df_mecze['rywal'].dropna().unique()
@@ -5273,20 +5314,17 @@ elif opcja == "🎮 Zagadki":
                                                 klub_part).strip()
 
                             miasto_norm = normalize_name(found_city).upper().replace('-', '').replace(' ', '')
-                            if 4 <= len(miasto_norm) <= 12 and miasto_norm not in unique_words:
+                            if 4 <= len(miasto_norm) <= 12:
                                 if clean_klub:
                                     clue = f"Miasto, z którego wywodzi się klub {clean_klub.title()} (rywal TSP). Odgadnij: MIASTO."
                                 else:
                                     clue = f"Z tego miasta pochodzi jeden z ligowych rywali TSP. Odgadnij: MIASTO."
-                                words_pool.append(
-                                    {'word': miasto_norm, 'clue': clue, 'entity_id': f"CITY_{miasto_norm}"})
-                                unique_words.add(miasto_norm)
+                                safe_add_to_pool(miasto_norm, clue, f"CITY_{miasto_norm}")
 
                             klub_norm = normalize_name(clean_klub).upper().replace('-', '').replace(' ', '')
-                            if 3 <= len(klub_norm) <= 12 and klub_norm not in unique_words and len(klub_norm) > 0:
+                            if 3 <= len(klub_norm) <= 12 and len(klub_norm) > 0:
                                 clue = f"Klub z miasta {found_city.title()}, z którym grało TSP. Odgadnij: NAZWA KLUBU (np. UNIA, RUCH)."
-                                words_pool.append({'word': klub_norm, 'clue': clue, 'entity_id': f"CLUB_{klub_norm}"})
-                                unique_words.add(klub_norm)
+                                safe_add_to_pool(klub_norm, clue, f"CLUB_{klub_norm}")
 
                 for attempt in range(100):
                     current_seed = (seed + attempt) % (2 ** 32)
@@ -5297,13 +5335,17 @@ elif opcja == "🎮 Zagadki":
                     grid = {}
                     clues_grid = {}
                     placed_words = []
+
+                    # NOWE: Blokuje również powtórzenia na etapie układania na planszy
                     used_entities = set()
+                    used_words_on_board = set()
 
                     w0 = pool.pop(0)
                     for i, char in enumerate(w0['word']): grid[(i, 0)] = char
                     placed_words.append({'id': 1, 'word': w0['word'], 'x': 0, 'y': 0, 'dir': 'H', 'clue': w0['clue']})
                     clues_grid[(-1, 0)] = {'id': 1, 'dir': 'H', 'clue': w0['clue']}
                     used_entities.add(w0.get('entity_id', ''))
+                    used_words_on_board.add(w0['word'])
 
                     word_id = 2
                     target_words = random.randint(14, 18)
@@ -5311,6 +5353,7 @@ elif opcja == "🎮 Zagadki":
                     for w in pool:
                         if len(placed_words) >= target_words: break
                         if w.get('entity_id') in used_entities: continue
+                        if w['word'] in used_words_on_board: continue
 
                         word = w['word']
                         placed = False
@@ -5371,6 +5414,7 @@ elif opcja == "🎮 Zagadki":
                                             clues_grid[(clue_x, clue_y)] = {'id': word_id, 'dir': cand_dir,
                                                                             'clue': w['clue']}
                                             used_entities.add(w.get('entity_id', ''))
+                                            used_words_on_board.add(word)
                                             word_id += 1
                                             placed = True
 
@@ -5441,7 +5485,6 @@ elif opcja == "🎮 Zagadki":
                 gave_up = st.session_state.get(f"cw_gave_up_{today_str}", False)
                 wszystko_ok = True
 
-                # INTERAKTYWNE POPOVERY DO WPISYWANIA HASEŁ
                 st.markdown("### 🔠 Panel Wpisywania Haseł")
                 cols_exp = st.columns(4)
                 for i, w in enumerate(sorted(placed_words, key=lambda x: x['id'])):
@@ -5473,7 +5516,6 @@ elif opcja == "🎮 Zagadki":
                             if coord in clues_grid:
                                 clue = clues_grid[coord]
                                 arrow = "➔" if clue['dir'] == 'H' else "▼"
-                                # KLIKALNE RÓŻOWE POLE - PRZESKAKUJE DO KOTWICY #krzyzowka-panel
                                 grid_html += f"<a href='#krzyzowka-panel' style='text-decoration:none; color:white;'><div style='background: #ff7675; padding: 2px; position: relative; border-radius: 3px; box-shadow: inset 0 0 3px rgba(0,0,0,0.3); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; height: 45px; width: 45px; cursor:pointer;'><b style='position:absolute; top:1px; left:2px; font-size:10px;'>{clue['id']}.</b><span style='position:absolute; bottom:1px; right:2px; font-size:14px; font-weight:bold;'>{arrow}</span></div></a>"
                             elif coord in grid:
                                 cell_char = grid[coord]
@@ -5550,10 +5592,10 @@ elif opcja == "🎮 Zagadki":
                                 user_w = st.session_state.get(f"cw_ans_{w['id']}_{today_str}", "").upper().strip()
                                 if user_w == w['word']:
                                     if w['dir'] == 'H' and w['y'] == coord[1] and w['x'] <= coord[0] < w['x'] + len(
-                                        w['word']):
+                                            w['word']):
                                         revealed = True
                                     elif w['dir'] == 'V' and w['x'] == coord[0] and w['y'] <= coord[1] < w['y'] + len(
-                                        w['word']):
+                                            w['word']):
                                         revealed = True
 
                         display_char = cell_char if revealed else "?"
@@ -5575,7 +5617,6 @@ elif opcja == "🎮 Zagadki":
                 elif gave_up:
                     st.error(f"Poddano się. Dzisiejsze Hasło to: **{haslo_dnia}**")
                     st.info(f"📜 **Rozwiązanie Tajemnicy:** {event_desc_solved}")
-
         # ==========================================
         # GRA 4: KOŁO FORTUNY (Zgadnij Zawodnika)
         # ==========================================
